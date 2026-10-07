@@ -270,7 +270,7 @@ class ClaudeAPIService: APIServiceProtocol {
             let startTime = Date()
             let (data, response): (Data, URLResponse)
             do {
-                (data, response) = try await URLSession.shared.data(for: request)
+                (data, response) = try await UsagePollingSessionDelegate.session.data(for: request)
             } catch {
                 // Network errors
                 let duration = Date().timeIntervalSince(startTime)
@@ -478,15 +478,8 @@ class ClaudeAPIService: APIServiceProtocol {
 
     /// Fetches usage data via OAuth access token (CLI credential flow)
     func fetchUsageData(oauthAccessToken: String) async throws -> ClaudeUsage {
-        guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
-            throw AppError(code: .urlMalformed, message: "Invalid OAuth usage endpoint", isRecoverable: false)
-        }
-
-        var request = buildAuthenticatedRequest(url: url, auth: .cliOAuth(oauthAccessToken))
-        request.httpMethod = "GET"
-        request.timeoutInterval = 30
-
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let request = UsagePollingRequest.claudeOAuth(accessToken: oauthAccessToken)
+        let (data, response) = try await UsagePollingSessionDelegate.session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AppError(code: .apiInvalidResponse, message: "Invalid response from OAuth endpoint", isRecoverable: true)
@@ -541,94 +534,10 @@ class ClaudeAPIService: APIServiceProtocol {
 
             return claudeUsage
 
-        case .cliOAuth:
-            // The dedicated OAuth usage endpoint (api.anthropic.com/api/oauth/usage) is disabled.
-            // Instead, make a minimal Messages API call and extract usage from response headers.
-            LoggingService.shared.log("ClaudeAPIService: Fetching usage via Messages API headers (OAuth)")
-
-            guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
-                throw AppError(
-                    code: .urlMalformed,
-                    message: "Invalid Messages API endpoint",
-                    isRecoverable: false
-                )
-            }
-
-            var request = buildAuthenticatedRequest(url: url, auth: auth)
-            request.httpMethod = "POST"
-            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-            request.timeoutInterval = 30
-
-            // Minimal request: cheapest model, 1 token, to get rate limit headers
-            let body: [String: Any] = [
-                "model": "claude-haiku-4-5-20251001",
-                "max_tokens": 1,
-                "messages": [["role": "user", "content": "hi"]]
-            ]
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-            let startTime = Date()
-            let (data, response): (Data, URLResponse)
-            do {
-                (data, response) = try await URLSession.shared.data(for: request)
-            } catch {
-                let duration = Date().timeIntervalSince(startTime)
-                NetworkLoggerService.shared.logRequest(
-                    url: url.absoluteString,
-                    method: "POST",
-                    requestBody: request.httpBody,
-                    responseData: nil,
-                    statusCode: nil,
-                    duration: duration,
-                    error: error
-                )
-                throw error
-            }
-
-            let duration = Date().timeIntervalSince(startTime)
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw AppError(
-                    code: .apiInvalidResponse,
-                    message: "Invalid response from Messages API",
-                    isRecoverable: true
-                )
-            }
-
-            // Log to NetworkLoggerService
-            NetworkLoggerService.shared.logRequest(
-                url: url.absoluteString,
-                method: "POST",
-                requestBody: request.httpBody,
-                responseData: data,
-                statusCode: httpResponse.statusCode,
-                duration: duration,
-                error: nil
-            )
-
-            // A 429 means the account is at its rate limit — which is exactly
-            // what we're here to measure. The unified rate-limit headers are
-            // still present on 429 responses, so parse them instead of
-            // failing the refresh right when the user most needs the data.
-            let has429UsageHeaders = httpResponse.statusCode == 429
-                && httpResponse.value(forHTTPHeaderField: "anthropic-ratelimit-unified-5h-utilization") != nil
-
-            guard httpResponse.statusCode == 200 || has429UsageHeaders else {
-                let responsePreview = String(data: data, encoding: .utf8)?.prefix(200) ?? "Unable to read response"
-                throw AppError(
-                    code: httpResponse.statusCode == 429 ? .apiRateLimited : .apiUnauthorized,
-                    message: httpResponse.statusCode == 429
-                        ? "Rate limited by Claude API"
-                        : "OAuth Messages API request failed",
-                    technicalDetails: "Status: \(httpResponse.statusCode)\nResponse: \(responsePreview)",
-                    isRecoverable: true,
-                    recoverySuggestion: httpResponse.statusCode == 429
-                        ? "Usage is at its limit — data will refresh once the rate limit window resets"
-                        : "Please re-sync your CLI account in Settings"
-                )
-            }
-
-            return parseUsageFromRateLimitHeaders(httpResponse)
+        case .cliOAuth(let accessToken):
+            // Poll account usage without sending a prompt or consuming model usage.
+            // If the endpoint is unavailable, surface its error; never probe a model.
+            return try await fetchUsageData(oauthAccessToken: accessToken)
 
         case .consoleAPISession:
             // Console API is for billing/credits only, not usage data
@@ -665,7 +574,7 @@ class ClaudeAPIService: APIServiceProtocol {
         let startTime = Date()
         let (data, response): (Data, URLResponse)
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await UsagePollingSessionDelegate.session.data(for: request)
         } catch {
             // Network-level errors
             let duration = Date().timeIntervalSince(startTime)

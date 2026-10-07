@@ -21,10 +21,9 @@ final class CodexUsageProvider: UsageProviderService {
         profile.hasUsageCredentials
     }
 
-    /// load credentials → refresh if stale (>8 days) → fetch → map.
-    /// On a 401/403 (access token expired before the 8-day mark), force one
-    /// refresh and retry once — the Codex CLI has no equivalent of Anthropic's
-    /// system-keychain fallback, so a failed retry surfaces the error.
+    /// File-based credentials are reloaded from Codex's current login; only
+    /// manually managed profiles rotate their tokens here. On a 401/403,
+    /// reload or refresh once and retry, then surface the login error.
     func fetchUsage(for profile: Profile) async throws -> ClaudeUsage {
         // The shared ~/.codex/auth.json reflects ONE signed-in Codex account.
         // Only the active profile may fall back to it — a non-active profile

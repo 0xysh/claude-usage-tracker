@@ -117,8 +117,75 @@ exit(1)
     private let bashScript = """
 #!/bin/bash
 config_file="$HOME/.claude/statusline-config.txt"
+# Config is data, including older files. Never source/eval its contents.
+SHOW_MODEL=1
+SHOW_DIRECTORY=1
+SHOW_BRANCH=1
+SHOW_CONTEXT=1
+CONTEXT_AS_TOKENS=0
+SHOW_USAGE=1
+SHOW_PROGRESS_BAR=1
+SHOW_PACE_MARKER=1
+SHOW_RESET_TIME=1
+USE_24_HOUR_TIME=0
+SHOW_CONTEXT_LABEL=1
+SHOW_USAGE_LABEL=1
+SHOW_RESET_LABEL=1
+COLOR_MODE=colored
+SINGLE_COLOR="#00BFFF"
+SHOW_PROFILE=0
+PROFILE_NAME=""
+PACE_MARKER_STEP_COLORS=1
+SHOW_WEEKLY=0
+SHOW_WEEKLY_BAR=1
+SHOW_WEEKLY_PACE_MARKER=1
+SHOW_WEEKLY_RESET_TIME=1
+SHOW_WEEKLY_LABEL=1
+SHOW_EXTRA_USAGE=0
+ELEMENT_COLOR_DIR="#0000EE"
+ELEMENT_COLOR_BRANCH="#00BB00"
+ELEMENT_COLOR_MODEL="#BBBB00"
+ELEMENT_COLOR_PROFILE="#BB00BB"
+ELEMENT_COLOR_CONTEXT="#00BBBB"
+ELEMENT_COLOR_SEPARATOR="#808080"
+ELEMENT_COLOR_USAGE=""
+ELEMENT_COLOR_PACE=""
+ELEMENT_COLOR_WEEKLY=""
+ELEMENT_COLOR_EXTRA=""
 if [ -f "$config_file" ]; then
-  source "$config_file"
+  while IFS= read -r config_line || [ -n "$config_line" ]; do
+    key="${config_line%%=*}"
+    [ "$key" != "$config_line" ] || continue
+    value="${config_line#*=}"
+    case "$key" in
+      SHOW_MODEL|SHOW_DIRECTORY|SHOW_BRANCH|SHOW_CONTEXT|CONTEXT_AS_TOKENS|SHOW_USAGE|SHOW_PROGRESS_BAR|SHOW_PACE_MARKER|SHOW_RESET_TIME|USE_24_HOUR_TIME|SHOW_CONTEXT_LABEL|SHOW_USAGE_LABEL|SHOW_RESET_LABEL|SHOW_PROFILE|PACE_MARKER_STEP_COLORS|SHOW_WEEKLY|SHOW_WEEKLY_BAR|SHOW_WEEKLY_PACE_MARKER|SHOW_WEEKLY_RESET_TIME|SHOW_WEEKLY_LABEL|SHOW_EXTRA_USAGE)
+        case "$value" in 0|1) printf -v "$key" '%s' "$value" ;; esac
+        ;;
+      COLOR_MODE)
+        case "$value" in colored|monochrome|singleColor|perElement) COLOR_MODE="$value" ;; esac
+        ;;
+      SINGLE_COLOR|ELEMENT_COLOR_DIR|ELEMENT_COLOR_BRANCH|ELEMENT_COLOR_MODEL|ELEMENT_COLOR_PROFILE|ELEMENT_COLOR_CONTEXT|ELEMENT_COLOR_SEPARATOR)
+        if [[ "$value" =~ ^#[0-9A-Fa-f]{6}$ ]]; then printf -v "$key" '%s' "$value"; fi
+        ;;
+      ELEMENT_COLOR_USAGE|ELEMENT_COLOR_PACE|ELEMENT_COLOR_WEEKLY|ELEMENT_COLOR_EXTRA)
+        if [[ "$value" =~ ^(#[0-9A-Fa-f]{6})?$ ]]; then printf -v "$key" '%s' "$value"; fi
+        ;;
+      PROFILE_NAME_BASE64)
+        if [[ "$value" =~ ^[A-Za-z0-9+/]*={0,2}$ ]] && decoded=$(printf '%s' "$value" | /usr/bin/base64 -D 2>/dev/null && printf '.'); then
+          # A sentinel preserves trailing newlines through command substitution.
+          PROFILE_NAME="${decoded%.}"
+        fi
+        ;;
+      PROFILE_NAME)
+        # Legacy names remain literal; only remove their outer quote pair.
+        if [[ "$value" == \\"*\\" ]] || [[ "$value" == \\'*\\' ]]; then
+          value="${value:1:${#value}-2}"
+        fi
+        PROFILE_NAME="$value"
+        ;;
+    esac
+  done < "$config_file"
+fi
   show_model=$SHOW_MODEL
   show_dir=$SHOW_DIRECTORY
   show_branch=$SHOW_BRANCH
@@ -153,42 +220,6 @@ if [ -f "$config_file" ]; then
   element_color_pace=$ELEMENT_COLOR_PACE
   element_color_weekly=$ELEMENT_COLOR_WEEKLY
   element_color_extra=$ELEMENT_COLOR_EXTRA
-else
-  show_model=1
-  show_dir=1
-  show_branch=1
-  show_context=1
-  context_as_tokens=0
-  show_usage=1
-  show_bar=1
-  show_pace_marker=1
-  show_reset=1
-  use_24h=0
-  show_context_label=1
-  show_usage_label=1
-  show_reset_label=1
-  color_mode="colored"
-  single_color="#00BFFF"
-  show_profile=0
-  profile_name=""
-  pace_marker_step_colors=1
-  show_weekly=0
-  show_weekly_bar=1
-  show_weekly_pace_marker=1
-  show_weekly_reset=1
-  show_weekly_label=1
-  show_extra_usage=0
-  element_color_dir="#0000EE"
-  element_color_branch="#00BB00"
-  element_color_model="#BBBB00"
-  element_color_profile="#BB00BB"
-  element_color_context="#00BBBB"
-  element_color_separator="#808080"
-  element_color_usage=""
-  element_color_pace=""
-  element_color_weekly=""
-  element_color_extra=""
-fi
 
 input=$(cat)
 current_dir_path=$(echo "$input" | grep -o '"current_dir":"[^"]*"' | sed 's/"current_dir":"//;s/"$//')
@@ -986,7 +1017,7 @@ SHOW_RESET_LABEL=\(showResetLabel ? "1" : "0")
 COLOR_MODE=\(colorModeString)
 SINGLE_COLOR=\(singleColorHex)
 SHOW_PROFILE=\(showProfile ? "1" : "0")
-PROFILE_NAME="\(profileName)"
+PROFILE_NAME_BASE64=\(Data(profileName.utf8).base64EncodedString())
 SHOW_WEEKLY=\(showWeekly ? "1" : "0")
 SHOW_WEEKLY_BAR=\(showWeeklyBar ? "1" : "0")
 SHOW_WEEKLY_PACE_MARKER=\(showWeeklyPaceMarker ? "1" : "0")
@@ -1022,11 +1053,13 @@ ELEMENT_COLOR_EXTRA=\(elementColors.extraUsageBaseHex ?? "")
 
         var content = try String(contentsOf: configPath, encoding: .utf8)
 
-        if let range = content.range(of: #"PROFILE_NAME="[^"]*""#, options: .regularExpression) {
-            content.replaceSubrange(range, with: "PROFILE_NAME=\"\(profileName)\"")
-        } else {
-            content += "\nPROFILE_NAME=\"\(profileName)\"\n"
-        }
+        // Remove both current and legacy name assignments without interpreting
+        // them. Unknown legacy lines are inert in the data-only script parser.
+        content = content.replacingOccurrences(
+            of: #"(?m)^PROFILE_NAME(?:_BASE64)?=[^\r\n]*(?:\r?\n|$)"#,
+            with: "", options: .regularExpression)
+        if !content.isEmpty && !content.hasSuffix("\n") { content += "\n" }
+        content += "PROFILE_NAME_BASE64=\(Data(profileName.utf8).base64EncodedString())\n"
 
         try content.write(to: configPath, atomically: true, encoding: .utf8)
     }
@@ -1057,7 +1090,7 @@ ELEMENT_COLOR_EXTRA=\(elementColors.extraUsageBaseHex ?? "")
 
             settings["statusLine"] = [
                 "type": "command",
-                "command": "bash \(commandPath)"
+                "command": "/bin/bash \(ShellLiteral.quote(commandPath))"
             ]
 
             let jsonData = try JSONSerialization.data(withJSONObject: settings, options: .prettyPrinted)
@@ -1105,7 +1138,7 @@ ELEMENT_COLOR_EXTRA=\(elementColors.extraUsageBaseHex ?? "")
         """
 
         if let name = profileName {
-            cacheContent += "\nPROFILE_NAME=\(name)"
+            cacheContent += "\nPROFILE_NAME_BASE64=\(Data(name.utf8).base64EncodedString())"
         }
 
         let weeklyPct = Int(usage.weeklyPercentage)

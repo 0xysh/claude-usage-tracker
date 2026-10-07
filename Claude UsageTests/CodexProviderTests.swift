@@ -327,18 +327,17 @@ final class CodexProviderTests: XCTestCase {
         XCTAssertNil(CodexAPIService.parseChatGPTBaseURL(from: toml), "a fully commented-out line must not be treated as the active setting")
     }
 
-    func testUsageURLDefaultsToWhamPath() {
-        let url = CodexAPIService.shared.usageURL(env: [:], configContents: "")
+    func testUsageURLDefaultsToWhamPath() throws {
+        let url = try CodexAPIService.shared.usageURL(env: [:], configContents: "")
         XCTAssertEqual(url.absoluteString, "https://chatgpt.com/backend-api/wham/usage")
     }
 
-    func testUsageURLNonBackendBaseUsesCodexPath() {
-        let url = CodexAPIService.shared.usageURL(env: [:], configContents: "chatgpt_base_url = \"https://proxy.corp.com\"")
-        XCTAssertEqual(url.absoluteString, "https://proxy.corp.com/api/codex/usage")
+    func testUsageURLRejectsProxyBeforeSendingCredentials() {
+        XCTAssertThrowsError(try CodexAPIService.shared.usageURL(env: [:], configContents: "chatgpt_base_url = \"https://proxy.corp.com\""))
     }
 
-    func testUsageURLBareChatGPTHostGetsBackendAPI() {
-        let url = CodexAPIService.shared.usageURL(env: [:], configContents: "chatgpt_base_url = \"https://chatgpt.com/\"")
+    func testUsageURLBareChatGPTHostGetsBackendAPI() throws {
+        let url = try CodexAPIService.shared.usageURL(env: [:], configContents: "chatgpt_base_url = \"https://chatgpt.com/\"")
         XCTAssertEqual(url.absoluteString, "https://chatgpt.com/backend-api/wham/usage")
     }
 }

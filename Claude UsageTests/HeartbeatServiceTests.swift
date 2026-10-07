@@ -1,8 +1,9 @@
 import XCTest
 @testable import Claude_Usage
 
+@MainActor
 final class HeartbeatServiceTests: XCTestCase {
-    func testRecordsVersionAndDateLocally() throws {
+    func testRecordsVersionAndDateLocally() async throws {
         let suite = "HeartbeatServiceTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -15,7 +16,7 @@ final class HeartbeatServiceTests: XCTestCase {
         XCTAssertEqual(defaults.object(forKey: "heartbeat.localRecordedAt") as? Date, now)
     }
 
-    func testDoesNotRecordAgainBeforeTwentyFourHours() throws {
+    func testDoesNotRecordAgainBeforeTwentyFourHours() async throws {
         let suite = "HeartbeatServiceTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -30,7 +31,7 @@ final class HeartbeatServiceTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: "heartbeat.localVersion"), "personal-2")
     }
 
-    func testOldRemotePingDoesNotSuppressFirstLocalRecord() throws {
+    func testOldRemotePingDoesNotSuppressFirstLocalRecord() async throws {
         let suite = "HeartbeatServiceTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }

@@ -27,11 +27,14 @@ class ProfileMigrationService {
             // 1. Create first profile from existing settings
             let firstProfile = createFirstProfileFromLegacy()
 
-            // 2. Migrate credentials from old Keychain keys to profile-specific keys
+            // Persist the profile before looking it up for credential migration.
+            let store = ProfileStore.shared
+            guard store.saveProfiles([firstProfile]) else {
+                throw store.lastPersistenceError ?? SecureProfilePersistenceError.secureWriteFailed
+            }
             try migrateCredentialsToProfile(firstProfile.id)
 
-            // 3. Save first profile
-            ProfileStore.shared.saveProfiles([firstProfile])
+            // Only publish migration state after secure profile persistence succeeds.
             ProfileStore.shared.saveActiveProfileId(firstProfile.id)
             ProfileStore.shared.saveDisplayMode(.single)
 
@@ -113,7 +116,9 @@ class ProfileMigrationService {
             LoggingService.shared.log("Migrated API organization ID")
         }
 
-        profileStore.saveProfiles(profiles)
+        guard profileStore.saveProfiles(profiles) else {
+            throw profileStore.lastPersistenceError ?? SecureProfilePersistenceError.secureWriteFailed
+        }
 
         // Note: Don't delete old keys yet for safety - can be cleaned up in a future version
 

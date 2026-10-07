@@ -16,7 +16,7 @@ from pathlib import Path
 import sys
 
 root, destination = map(Path, sys.argv[1:])
-for filename in ('HeartbeatServiceTests.swift', 'FeedbackIssueURLTests.swift'):
+for filename in ('HeartbeatServiceTests.swift', 'FeedbackIssueURLTests.swift', 'UsagePollingRequestTests.swift'):
     source = (root / 'Claude UsageTests' / filename).read_text()
     # Compile the exact production files beside these tests, without loading the
     # application's executable module or its hosted test runner.
@@ -24,6 +24,7 @@ for filename in ('HeartbeatServiceTests.swift', 'FeedbackIssueURLTests.swift'):
 PY
 
 xcrun swiftc -emit-library -module-name OwnershipTests \
+    -default-isolation MainActor \
     -module-cache-path "$test_directory/module-cache" \
     -I "$test_support/usr/lib" \
     -F "$test_support/Library/Frameworks" \
@@ -32,6 +33,8 @@ xcrun swiftc -emit-library -module-name OwnershipTests \
     -Xlinker -rpath -Xlinker "$test_support/usr/lib" \
     "$repo_root/Claude Usage/Shared/Services/HeartbeatService.swift" \
     "$repo_root/Claude Usage/Shared/Utilities/FeedbackIssueURL.swift" \
+    "$repo_root/Claude Usage/Shared/Utilities/UsagePollingRequest.swift" \
+    "$test_directory/UsagePollingRequestTests.swift" \
     "$test_directory/HeartbeatServiceTests.swift" \
     "$test_directory/FeedbackIssueURLTests.swift" \
     -o "$bundle/Contents/MacOS/OwnershipTests"

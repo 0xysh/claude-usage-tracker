@@ -9,7 +9,7 @@ import Foundation
 import Security
 
 /// Service for secure storage and retrieval of sensitive data using macOS Keychain
-class KeychainService {
+class KeychainService: ProfileSnapshotStorage, ProfileLegacySecretStorage {
     static let shared = KeychainService()
 
     private init() {}
@@ -177,6 +177,37 @@ class KeychainService {
 
     /// Single service for all per-profile secrets; the account encodes profile + field.
     private static let profileSecretsService = "com.claudeusagetracker.profile-credentials"
+    private static let profileSnapshotsService = "com.claudeusagetracker.profile-credential-snapshots"
+
+    /// Immutable complete snapshots are staged under fresh IDs. ProfileStore
+    /// commits their reference only after a direct, byte-for-byte readback.
+    func writeSnapshot(_ data: Data, id: UUID) -> Bool {
+        do {
+            try saveItem(data.base64EncodedString(), service: Self.profileSnapshotsService, account: id.uuidString)
+            return true
+        } catch {
+            LoggingService.shared.logError("Keychain: secure profile snapshot write failed")
+            return false
+        }
+    }
+
+    func readSnapshot(id: UUID) throws -> Data? {
+        guard let value = try loadItem(service: Self.profileSnapshotsService, account: id.uuidString) else { return nil }
+        guard let data = Data(base64Encoded: value) else { throw KeychainError.invalidData }
+        return data
+    }
+
+    @discardableResult
+    func deleteSnapshot(id: UUID) -> Bool {
+        deleteItem(service: Self.profileSnapshotsService, account: id.uuidString)
+    }
+
+    /// Legacy migration must distinguish inaccessible storage from missing data
+    /// and must not rely on a potentially stale in-memory cache.
+    func readProfileSecret(profileId: UUID, field: ProfileSecretField) throws -> String? {
+        if profileSecretStorageKnownUnavailable { throw KeychainError.loadFailed(status: errSecMissingEntitlement) }
+        return try loadItem(service: Self.profileSecretsService, account: profileSecretAccount(profileId, field))
+    }
 
     /// In-memory cache: `loadProfiles()` runs on hot paths (every switch/sync/refresh),
     /// so avoid a SecItemCopyMatching round-trip per field per profile per load.
@@ -202,7 +233,7 @@ class KeychainService {
     func saveProfileSecret(_ value: String?, profileId: UUID, field: ProfileSecretField) -> Bool {
         if profileSecretStorageKnownUnavailable, value != nil {
             // Expected on ad-hoc dev builds; the one-time noteStatus line
-            // already explained why. Callers keep the plist fallback.
+            // already explained why. Callers must fail without plaintext writes.
             return false
         }
         let account = profileSecretAccount(profileId, field)
@@ -294,7 +325,7 @@ class KeychainService {
     /// every rebuild, so the very next build reading an item the previous one
     /// wrote throws the "wants to use your confidential information" password
     /// dialog. Ad-hoc builds therefore skip the file-based store entirely and
-    /// keep the legacy plist fallback (pre-#292 behavior, zero prompts).
+    /// fail closed without writing credentials to the legacy plaintext plist.
     private lazy var fileBasedFallbackAllowed: Bool = {
         var code: SecCode?
         guard SecCodeCopySelf([], &code) == errSecSuccess, let code = code else { return false }
@@ -331,7 +362,7 @@ class KeychainService {
             if !dataProtectionUnavailable {
                 LoggingService.shared.log(fileBasedFallbackAllowed
                     ? "Keychain: data-protection keychain unavailable (no application-identifier entitlement) — using file-based login keychain"
-                    : "Keychain: data-protection keychain unavailable (no application-identifier entitlement) — no reachable keychain store in this ad-hoc build; profile secrets stay in the plist")
+                    : "Keychain: no reachable secure store in this ad-hoc build; profile credential changes cannot be persisted")
             }
             dataProtectionUnavailable = true
         }
@@ -406,7 +437,10 @@ class KeychainService {
             // Fall through on not-found too: secrets written by an unentitled
             // build must stay readable if this build gained the entitlement.
         }
-        guard fileBasedFallbackAllowed else { return nil }
+        guard fileBasedFallbackAllowed else {
+            if dataProtectionUnavailable { throw KeychainError.loadFailed(status: errSecMissingEntitlement) }
+            return nil
+        }
         return try loadItem(service: service, account: account, dataProtection: false)
     }
 

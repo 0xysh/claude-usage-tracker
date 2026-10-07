@@ -18,16 +18,19 @@ final class CodexAPIService {
 
     // MARK: - URL resolution
 
-    /// Base URL: `chatgpt_base_url` from `~/.codex/config.toml` when set,
-    /// else the default ChatGPT backend. Usage path depends on the base:
-    /// `/wham/usage` for backend-api bases, `/api/codex/usage` otherwise
-    /// (enterprise proxies).
+    /// Honor only official HTTPS ChatGPT origins. Never attach OAuth tokens to
+    /// a locally configured proxy or silently fall back from an invalid setting.
     func usageURL(env: [String: String] = ProcessInfo.processInfo.environment,
-                  configContents: String? = nil) -> URL {
-        let base = normalizeBaseURL(resolveBaseURL(env: env, configContents: configContents))
-        let path = base.contains("/backend-api") ? "/wham/usage" : "/api/codex/usage"
-        return URL(string: base + path)
-            ?? URL(string: Constants.APIEndpoints.codexBase + "/wham/usage")!
+                  configContents: String? = nil) throws -> URL {
+        do {
+            return try UsagePollingRequest.codexURL(baseURL: resolveBaseURL(env: env, configContents: configContents))
+        } catch {
+            throw AppError(code: .urlMalformed,
+                           message: "Codex monitoring requires an official HTTPS ChatGPT endpoint.",
+                           technicalDetails: "Configured usage destination was rejected before authentication.",
+                           isRecoverable: true,
+                           recoverySuggestion: "Remove the custom chatgpt_base_url override before connecting this monitor.")
+        }
     }
 
     private func resolveBaseURL(env: [String: String], configContents: String?) -> String {
@@ -42,17 +45,6 @@ final class CodexAPIService {
             return parsed
         }
         return Constants.APIEndpoints.codexBase
-    }
-
-    private func normalizeBaseURL(_ value: String) -> String {
-        var trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { trimmed = Constants.APIEndpoints.codexBase }
-        while trimmed.hasSuffix("/") { trimmed.removeLast() }
-        if trimmed.hasPrefix("https://chatgpt.com") || trimmed.hasPrefix("https://chat.openai.com"),
-           !trimmed.contains("/backend-api") {
-            trimmed += "/backend-api"
-        }
-        return trimmed
     }
 
     /// Minimal TOML line scan for `chatgpt_base_url = "..."` (comments and
@@ -81,17 +73,13 @@ final class CodexAPIService {
     // MARK: - Fetch
 
     func fetchUsage(credentials: CodexCredentials) async throws -> CodexUsageResponse {
-        let url = usageURL()
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let accountId = credentials.resolvedAccountId, !accountId.isEmpty {
-            request.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id")
-        }
+        let url = try usageURL()
+        let request = try UsagePollingRequest.codex(baseURL: url.deletingLastPathComponent().deletingLastPathComponent().absoluteString,
+                                                   accessToken: credentials.accessToken,
+                                                   accountID: credentials.resolvedAccountId)
 
         let startTime = Date()
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await UsagePollingSessionDelegate.session.data(for: request)
         let statusCode = (response as? HTTPURLResponse)?.statusCode
 
         NetworkLoggerService.shared.logRequest(
