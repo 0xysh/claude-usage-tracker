@@ -78,7 +78,7 @@ installation uses Control + Option + Command + U; macOS registration was verifie
 Opening the installed app again from Applications also reveals the dashboard.
 
 Each card uses its own profile's readings and errors. Missing readings show
-Unavailable, failed refreshes or readings older than five minutes show Last known,
+Not connected, failed refreshes or readings older than five minutes show Saved,
 and recent successful readings show Fresh. The used/remaining label follows the
 existing percentage preference. The popup's **Used % / Remaining %** switch changes all cards together and saves
 the existing multi-profile percentage preference. In multi-profile mode it also
@@ -104,6 +104,10 @@ Saved readings use a clock and neutral menu-bar styling; missing readings retain
 their profile label. The tooltip names session/week percentages and used/remaining
 mode. The percentage mode also applies to single-profile icons while the combined
 view is enabled. Detached combined content uses the combined window width.
+Primary Session/Weekly/Fable rows use a compact layout so both provider sections
+fit the normal popup; connection help and provider plan/credits are expandable.
+Additional accounts or expanded details remain scrollable. The individual view
+retains its full row layout and account details.
 
 The follow-up quality audit and exact current validation limits are in
 [APP-QUALITY-AUDIT-2026-10-07.md](APP-QUALITY-AUDIT-2026-10-07.md).

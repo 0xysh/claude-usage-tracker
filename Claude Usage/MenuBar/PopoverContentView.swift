@@ -611,6 +611,7 @@ struct SmartUsageDashboard: View {
     var provider: Provider = .anthropic
     var showRemainingOverride: Bool? = nil
     var readingState: UsageDataState = .fresh
+    var compactLayout: Bool = false
     @StateObject private var profileManager = ProfileManager.shared
     private var capabilities: ProviderCapabilities {
         provider.descriptor.capabilities
@@ -650,7 +651,7 @@ struct SmartUsageDashboard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: compactLayout ? 4 : 6) {
             // Primary: Session Usage
             UsageRow(
                 title: "menubar.session_usage".localized,
@@ -759,7 +760,7 @@ struct SmartUsageDashboard: View {
             }
 
             // Plan / credits (providers that report them, e.g. Codex)
-            if usage.planType != nil || usage.creditsUnlimited == true || usage.creditsBalance != nil {
+            if !compactLayout && (usage.planType != nil || usage.creditsUnlimited == true || usage.creditsBalance != nil) {
                 HStack(spacing: 6) {
                     if let plan = usage.planType {
                         Text(plan.replacingOccurrences(of: "_", with: " ").capitalized)
@@ -795,9 +796,10 @@ struct SmartUsageDashboard: View {
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, compactLayout ? 0 : 14)
+        .padding(.vertical, compactLayout ? 0 : 8)
         .environment(\.usageReadingState, readingState)
+        .environment(\.usageCompactLayout, compactLayout)
     }
 }
 
@@ -806,10 +808,19 @@ private struct UsageReadingStateKey: EnvironmentKey {
     static let defaultValue: UsageDataState = .fresh
 }
 
+private struct UsageCompactLayoutKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     var usageReadingState: UsageDataState {
         get { self[UsageReadingStateKey.self] }
         set { self[UsageReadingStateKey.self] = newValue }
+    }
+
+    var usageCompactLayout: Bool {
+        get { self[UsageCompactLayoutKey.self] }
+        set { self[UsageCompactLayoutKey.self] = newValue }
     }
 }
 
@@ -827,6 +838,7 @@ struct UsageRow: View {
     var timeDisplay: PopoverTimeDisplay = .resetTime
     var isAvailable: Bool = true
     @Environment(\.usageReadingState) private var readingState
+    @Environment(\.usageCompactLayout) private var compactLayout
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var hasReading: Bool { isAvailable && usedPercentage.isFinite && usedPercentage >= 0 }
@@ -883,7 +895,7 @@ struct UsageRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             // Title row with percentage
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: compactLayout ? .center : .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 5) {
                         Text(title)
@@ -903,10 +915,22 @@ struct UsageRow: View {
                         }
                     }
 
-                    if let subtitle = subtitle {
+                    if let subtitle = subtitle, !compactLayout || periodDuration == nil {
                         Text(subtitle)
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
+                    }
+
+                    if compactLayout {
+                        if !hasReading {
+                            Text("No quota reported")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        } else if let reset = resetTime {
+                            Text(resetTimeText(for: reset))
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -940,27 +964,43 @@ struct UsageRow: View {
                 }
             }
             .frame(height: 4)
-            } else {
+            } else if !compactLayout {
                 Text("No quota reported")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
 
             // Reset time
-            if hasReading, let reset = resetTime {
+            if !compactLayout, hasReading, let reset = resetTime {
                 Text(resetTimeText(for: reset))
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
-        )
+        .padding(.horizontal, compactLayout ? 0 : 10)
+        .padding(.vertical, compactLayout ? 3 : 8)
+        .background {
+            if !compactLayout {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
+            }
+        }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title), \(MenuBarUsagePresentation.percentageText(hasReading ? displayPercentage : nil)) \(showRemaining ? "remaining" : "used")\(readingState == .fresh ? "" : ", last known reading")")
+        .accessibilityLabel(accessibilityDescription)
+    }
+
+    private var accessibilityDescription: String {
+        var parts = [title]
+        if let tag { parts.append(tag) }
+        if let subtitle { parts.append(subtitle) }
+        if hasReading {
+            parts.append("\(MenuBarUsagePresentation.percentageText(displayPercentage)) \(showRemaining ? "remaining" : "used")")
+            if readingState != .fresh { parts.append("last known reading") }
+            if let reset = resetTime { parts.append(resetTimeText(for: reset)) }
+        } else {
+            parts.append("No quota reported")
+        }
+        return parts.joined(separator: ", ")
     }
 
     private func resetTimeText(for reset: Date) -> String {

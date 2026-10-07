@@ -31,6 +31,7 @@ run is needed. Stop after those gates; this is not an unbounded feature rewrite.
 | P2 | Recovery opened generic appearance settings rather than the affected account | Connect account selects that profile and opens its provider's credential section | Source routing inspection; live UI verification recorded below |
 | P2 | Percentage switch in a combined popup did not update single-profile icons consistently | Apply the same app-wide combined preference and avoid calling multi-mode configuration from single-mode notifications | Source flow inspection and full local qualification |
 | P2 | Detached combined content used an individual window's 280-point width | Size the detached window for the combined view | Source sizing inspection; live detachment remains a manual gate |
+| P2 | The installed popup's expanded recovery copy and secondary account data pushed the other provider below the useful overview | Compact primary rows; keep Fable visible; collapse connection help and plan/credits into details | Actual installed screenshot exposed the defect; two-provider render height falls from 851 to 527 points, with 120 reserved for header/mode picker |
 | P2 | Test-host network logging could load/write the real app's diagnostic file | Test lifecycle keeps this logger in memory and never loads or saves the production file | Source guard in addition to isolated preferences |
 | P3 | Small labels, unlabeled icon/traffic-light controls, missing Reduce Motion support | Larger readings/copy, named controls, native button semantics and motion preference | Source and light/dark render inspection |
 | P3 | Status-item cache could outlive removed buttons or ignore template/dimension changes | Clear lifecycle cache/timer; include image dimensions and template mode in its identity | Source inspection |
@@ -74,12 +75,26 @@ was removed; all 12 focused state/presentation/render tests then passed.
 These fixtures are not the user's live quota readings or screenshots of the
 installed app.
 
-Final local qualification passed at `build/local-ci.yhmoLy`: **329 tests,
-327 passed, 0 failed, 2 skipped**. The two skipped unsigned Keychain round trips
+The first actual installed-app capture was obtained by reopening
+`/Applications/Claude Usage.app`, identifying its own popup window and capturing
+that window only. This verified normal application reopen and exposed excessive
+vertical density. `testTwoProviderOverviewFitsWithoutScrollingPrimaryQuotas`
+failed before the correction, then passed in both appearances after compact
+rows and collapsed details. All three rendering tests pass. The measured pair
+includes Claude's zero Fable quota and a saved/error Codex reading with plan and
+credit metadata; both primary sections now fit the 680-point popup. Additional
+profiles, extra usage rows or expanded details remain scrollable. The initial
+851-point and final 527-point measurements are synthetic renders, not live quota
+data. Only the combined layout is condensed; individual dashboards retain their
+full subtitle and plan/credit display. Screen-reader descriptions retain period,
+reset and missing-reading context.
+
+Final local qualification passed at `build/local-ci.66tjsM`: **330 tests,
+328 passed, 0 failed, 2 skipped**. The two skipped unsigned Keychain round trips
 are not counted as verified signed-app storage behavior. Debug and optimized
 universal arm64/x86_64 Release builds passed. Xcode 27.0 beta (27A5228h) is
 explicitly non-parity with CI's Xcode 26.0.1. Result bundle:
-`build/local-ci.yhmoLy/TestResults.xcresult`.
+`build/local-ci.66tjsM/TestResults.xcresult`.
 
 All five focused command checks also passed on the integrated source: activation
 5 tests, Claude identity 8 tests, passive polling 5 controls, Codex binding and

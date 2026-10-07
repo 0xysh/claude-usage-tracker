@@ -66,6 +66,42 @@ final class UsageRenderingTests: XCTestCase {
         }
     }
 
+    func testTwoProviderOverviewFitsWithoutScrollingPrimaryQuotas() throws {
+        var claudeUsage = ClaudeUsage.empty
+        claudeUsage.sessionPercentage = 23
+        claudeUsage.weeklyPercentage = 78
+        claudeUsage.fableUsageAvailable = true
+        claudeUsage.fableWeeklyPercentage = 0
+        claudeUsage.fableWeeklyResetTime = claudeUsage.weeklyResetTime
+        let claude = Profile(name: "Claude Max · Personal account", claudeUsage: claudeUsage)
+        var codexUsage = claudeUsage
+        codexUsage.weeklyPercentage = 8
+        codexUsage.fableUsageAvailable = false
+        codexUsage.planType = "pro"
+        codexUsage.creditsBalance = 62498.61
+        codexUsage.lastUpdated = Date().addingTimeInterval(-1800)
+        let codex = Profile(name: "Codex Pro · Personal account", provider: .codex, claudeUsage: codexUsage)
+
+        for scheme in [ColorScheme.light, .dark] {
+            let cards = VStack(spacing: 12) {
+                ProfileUsageCard(profile: claude, error: nil, showRemaining: false,
+                                 isRefreshing: false, onRefresh: {}, onPreferences: {})
+                ProfileUsageCard(profile: codex, error: "Run Test Connection for this account.",
+                                 showRemaining: false, isRefreshing: false,
+                                 onRefresh: {}, onPreferences: {})
+            }
+            .padding(12)
+            .frame(width: 360)
+            .background(scheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color.white)
+            .environment(\.colorScheme, scheme)
+            let image = try XCTUnwrap(ImageRenderer(content: cards).nsImage)
+            // The 680-point popup reserves 120 points for its header and mode picker.
+            XCTAssertLessThanOrEqual(image.size.height + 120, 680,
+                                     "Both providers' primary quotas must fit with account details collapsed.")
+            try retain(image, name: "overview-\(scheme == .dark ? "dark" : "light")")
+        }
+    }
+
     private func retain(_ image: NSImage, name: String) throws {
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let data = try XCTUnwrap(image.tiffRepresentation)

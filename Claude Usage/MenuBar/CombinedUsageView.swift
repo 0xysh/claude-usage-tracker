@@ -127,7 +127,7 @@ struct ProfileUsageCard: View {
                 refreshFailed: error != nil,
                 now: timeline.date
             )
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
@@ -157,12 +157,9 @@ struct ProfileUsageCard: View {
                 }
 
                 if let usage = profile.claudeUsage {
-                    Text(showRemaining ? "Remaining capacity" : "Used capacity")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
                     SmartUsageDashboard(usage: usage, apiUsage: profile.apiUsage, provider: profile.provider,
-                                        showRemainingOverride: showRemaining, readingState: state)
-                        .padding(.horizontal, -10)
+                                        showRemainingOverride: showRemaining, readingState: state,
+                                        compactLayout: true)
                     if profile.provider == .anthropic, !usage.hasFableUsage {
                         Text("Fable · No quota reported")
                             .font(.system(size: 11))
@@ -175,26 +172,39 @@ struct ProfileUsageCard: View {
                         .padding(.vertical, 8)
                 }
 
-                if error != nil || state == .unavailable {
-                    Text(recoveryMessage)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let error {
-                        DisclosureGroup("Connection details") {
-                            Text(error)
-                                .font(.system(size: 11))
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                if state == .lastKnown && error == nil {
+                    Text("Saved reading. Refresh for current usage.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
+                }
+
+                if error != nil || state == .unavailable || hasAccountDetails {
+                    DisclosureGroup(error != nil || state == .unavailable ? "Connection help" : "Account details") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            if error != nil || state == .unavailable {
+                                Text(recoveryMessage)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            if let error {
+                                Text(error)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            if let usage = profile.claudeUsage {
+                                if let plan = usage.planType {
+                                    Text(plan.replacingOccurrences(of: "_", with: " ").capitalized)
+                                }
+                                if usage.creditsUnlimited == true {
+                                    Text("popover.credits_unlimited".localized)
+                                } else if let balance = usage.creditsBalance {
+                                    Text("popover.credits_balance".localized(with: String(format: "%.2f", balance)))
+                                }
+                            }
+                        }
+                        .padding(.top, 6)
                     }
-                } else if state == .lastKnown {
-                    Text("Last received reading. Refresh to check your current allowance.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
                 }
 
                 HStack {
@@ -204,7 +214,8 @@ struct ProfileUsageCard: View {
                     .disabled(isRefreshing)
                     Spacer()
                     if state != .fresh {
-                        Button("Connect account", action: onPreferences)
+                        Button(error != nil || state == .unavailable ? "Connect account" : "Account settings",
+                               action: onPreferences)
                     }
                 }
                 .font(.system(size: 12, weight: .medium))
@@ -224,5 +235,10 @@ struct ProfileUsageCard: View {
                     .padding(.vertical, 14)
             }
         }
+    }
+
+    private var hasAccountDetails: Bool {
+        guard let usage = profile.claudeUsage else { return false }
+        return usage.planType != nil || usage.creditsUnlimited == true || usage.creditsBalance != nil
     }
 }
