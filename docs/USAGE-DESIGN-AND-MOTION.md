@@ -207,3 +207,23 @@ Xcode 27 beta `27A5228h` remains non-parity with Actions' unavailable Xcode
 notarization. Native Reduce Motion policy and bounded
 cancellation still rely on tests/source review; the system preference was not
 changed and midway rendered-frame cancellation was not claimed.
+
+## Compact menu-bar spacing
+
+The spacing follow-up tightens only the unified summary: label/period gaps move
+from 5 to 3 points, separators use one space on each side, and the saved-reading
+clock reserves 12 rather than 13 points. Fonts and the full `999%+` field stay
+unchanged. For one Codex, one Claude and Fable, this reduces the fixed width from
+395 to 368 points (6.8%) while preserving the native item and readable group
+separators. Fresh, saved, unavailable, used/remaining and overflow readings retain
+the same width; overflow and saved clocks were inspected in both appearances.
+
+The exact local gate at `build/local-ci.2uvjfW/TestResults.xcresult` passes
+379 of 381 tests, with 0 failures and the same two unsigned Keychain skips.
+Debug and optimized universal Release pass; the Xcode non-parity qualification
+remains explicit. No GitHub Actions run is required for this refinement.
+The signed update is installed; its actual menu-bar capture is
+`/private/tmp/claude-polish-audit/menu-spacing-installed.png`. Strict nested
+signatures pass, both executable slices remain present, and installed/package
+executable bytes match. The previous installation is preserved at
+`release/personal/backups/install-20261007-123217-jRybQP`.

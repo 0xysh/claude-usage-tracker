@@ -62,7 +62,10 @@ struct CombinedMenuBarPresentation {
     static let periodFont = NSFont.systemFont(ofSize: 12, weight: .medium)
     static let valueFont = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
     static let separatorFont = NSFont.systemFont(ofSize: 13, weight: .medium)
-    static var separatorWidth: CGFloat { textWidth("  |  ", font: separatorFont) }
+    static let labelGap: CGFloat = 3
+    static let separatorText = " | "
+    static let savedIndicatorWidth: CGFloat = 12
+    static var separatorWidth: CGFloat { textWidth(separatorText, font: separatorFont) }
     static var valueWidth: CGFloat { textWidth("999%+", font: valueFont) }
 
     static func textWidth(_ text: String, font: NSFont) -> CGFloat {
@@ -70,9 +73,9 @@ struct CombinedMenuBarPresentation {
     }
 
     static func width(for segment: Segment) -> CGFloat {
-        textWidth(segment.title, font: nameFont) + 5
-            + (segment.period.isEmpty ? 0 : textWidth(segment.period, font: periodFont) + 5)
-            + valueWidth + 13 // reserve the saved-reading clock without later resizing
+        textWidth(segment.title, font: nameFont) + labelGap
+            + (segment.period.isEmpty ? 0 : textWidth(segment.period, font: periodFont) + labelGap)
+            + valueWidth + savedIndicatorWidth // reserve the saved-reading clock without later resizing
     }
 }
 
@@ -102,17 +105,20 @@ extension MenuBarIconRenderer {
         var x: CGFloat = 2
         for (index, segment) in presentation.segments.enumerated() {
             if index > 0 {
-                draw("  |  ", x: x, font: CombinedMenuBarPresentation.separatorFont, color: secondary)
+                draw(CombinedMenuBarPresentation.separatorText, x: x,
+                     font: CombinedMenuBarPresentation.separatorFont, color: secondary)
                 x += CombinedMenuBarPresentation.separatorWidth
             }
             let width = CombinedMenuBarPresentation.width(for: segment)
             let accent = config.useSystemColor ? foreground
                 : ProviderBrandPalette.accent(for: segment.provider, isDarkMode: isDarkMode)
             draw(segment.title, x: x, font: CombinedMenuBarPresentation.nameFont, color: accent)
-            var next = x + CombinedMenuBarPresentation.textWidth(segment.title, font: CombinedMenuBarPresentation.nameFont) + 5
+            var next = x + CombinedMenuBarPresentation.textWidth(segment.title, font: CombinedMenuBarPresentation.nameFont)
+                + CombinedMenuBarPresentation.labelGap
             if !segment.period.isEmpty {
                 draw(segment.period, x: next, font: CombinedMenuBarPresentation.periodFont, color: secondary)
-                next += CombinedMenuBarPresentation.textWidth(segment.period, font: CombinedMenuBarPresentation.periodFont) + 5
+                next += CombinedMenuBarPresentation.textWidth(segment.period, font: CombinedMenuBarPresentation.periodFont)
+                    + CombinedMenuBarPresentation.labelGap
             }
             let valueWidth = CombinedMenuBarPresentation.textWidth(segment.valueText, font: CombinedMenuBarPresentation.valueFont)
             let valueColor: NSColor

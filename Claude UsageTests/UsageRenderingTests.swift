@@ -114,14 +114,27 @@ final class UsageRenderingTests: XCTestCase {
                         Profile(name: "Claude Max", claudeUsage: usage)]
         let renderer = MenuBarIconRenderer()
         for dark in [false, true] {
-            for state in ["fresh", "saved", "missing"] {
+            for state in ["fresh", "saved", "saved-overflow", "missing"] {
                 var profiles = selected
-                if state == "saved" {
+                if state == "saved" || state == "saved-overflow" {
                     for index in profiles.indices { profiles[index].claudeUsage?.lastUpdated = .distantPast }
                 } else if state == "missing" {
                     for index in profiles.indices { profiles[index].claudeUsage = nil }
                 }
+                if state == "saved-overflow" {
+                    for index in profiles.indices {
+                        profiles[index].claudeUsage?.weeklyPercentage = 1000
+                        profiles[index].claudeUsage?.fableWeeklyPercentage = 1000
+                    }
+                }
                 let model = CombinedMenuBarPresentation(profiles: profiles, config: .default, errors: [:])
+                XCTAssertEqual(model.reservedWidth,
+                               CombinedMenuBarPresentation(profiles: selected, config: .default, errors: [:]).reservedWidth,
+                               "Fresh, saved, overflow and unavailable readings must not move neighboring menu items.")
+                XCTAssertTrue(model.segments.allSatisfy {
+                    CombinedMenuBarPresentation.textWidth($0.valueText, font: CombinedMenuBarPresentation.valueFont)
+                        <= CombinedMenuBarPresentation.valueWidth
+                }, "The reserved numeric field must retain the complete overflow label.")
                 let image = renderer.createCombinedProfileSummary(profiles: profiles, config: .default,
                                                                   errors: [:], isDarkMode: dark)
                 XCTAssertEqual(image.size.width, model.reservedWidth)
