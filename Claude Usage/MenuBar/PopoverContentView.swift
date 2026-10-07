@@ -659,7 +659,7 @@ struct SmartUsageDashboard: View {
             // A provider's absent window is not a measured zero or a plan-based assumption.
             if provider != .codex || usage.hasSessionUsage {
                 UsageRow(
-                    title: "menubar.session_usage".localized,
+                    title: "menubar.five_hour_limit".localized,
                     subtitle: "menubar.5_hour_window".localized,
                     usedPercentage: readingState == .fresh ? usage.effectiveSessionPercentage : usage.sessionPercentage,
                     showRemaining: showRemainingPercentage,
@@ -675,8 +675,7 @@ struct SmartUsageDashboard: View {
 
             if usage.designWeeklyTokensUsed > 0 {
                 UsageRow(
-                    title: "menubar.design_usage".localized,
-                    tag: "menubar.weekly".localized,
+                    title: "menubar.weekly_model".localized(with: "menubar.design_usage".localized),
                     subtitle: nil,
                     usedPercentage: usage.designWeeklyPercentage,
                     showRemaining: showRemainingPercentage,
@@ -688,8 +687,7 @@ struct SmartUsageDashboard: View {
 
             // All Models (Weekly)
             UsageRow(
-                title: provider == .codex ? "Weekly usage" : "menubar.all_models".localized,
-                tag: "menubar.weekly".localized,
+                title: provider == .codex ? "menubar.weekly_usage".localized : "menubar.weekly_all_models".localized,
                 subtitle: nil,
                 usedPercentage: usage.weeklyPercentage,
                 showRemaining: showRemainingPercentage,
@@ -704,8 +702,7 @@ struct SmartUsageDashboard: View {
 
             if usage.hasFableUsage {
                 UsageRow(
-                    title: "menubar.fable_usage".localized,
-                    tag: "menubar.weekly".localized,
+                    title: "menubar.weekly_fable".localized,
                     subtitle: nil,
                     usedPercentage: usage.fableWeeklyPercentage,
                     showRemaining: showRemainingPercentage,
@@ -717,8 +714,7 @@ struct SmartUsageDashboard: View {
 
             if usage.opusWeeklyTokensUsed > 0 {
                 UsageRow(
-                    title: "menubar.opus_usage".localized,
-                    tag: "menubar.weekly".localized,
+                    title: "menubar.weekly_model".localized(with: "menubar.opus_usage".localized),
                     subtitle: nil,
                     usedPercentage: usage.opusWeeklyPercentage,
                     showRemaining: showRemainingPercentage,
@@ -729,7 +725,7 @@ struct SmartUsageDashboard: View {
 
             if usage.sonnetWeeklyTokensUsed > 0 {
                 UsageRow(
-                    title: "menubar.sonnet_usage".localized,
+                    title: "menubar.weekly_model".localized(with: "menubar.sonnet_usage".localized),
                     subtitle: nil,
                     usedPercentage: usage.sonnetWeeklyPercentage,
                     showRemaining: showRemainingPercentage,
@@ -809,7 +805,6 @@ extension EnvironmentValues {
 
 struct UsageRow: View {
     let title: String
-    var tag: String? = nil
     let subtitle: String?
     let usedPercentage: Double
     let showRemaining: Bool
@@ -879,23 +874,9 @@ struct UsageRow: View {
             // Title row with percentage
             HStack(alignment: compactLayout ? .center : .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 5) {
-                        Text(title)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.primary)
-
-                        if let tag = tag {
-                            Text(tag)
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.secondary)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1)
-                                .background(
-                                    Capsule()
-                                        .fill(Color.primary.opacity(0.08))
-                                )
-                        }
-                    }
+                    Text(title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.primary)
 
                     if let subtitle = subtitle, !compactLayout || periodDuration == nil {
                         Text(subtitle)
@@ -954,7 +935,6 @@ struct UsageRow: View {
 
     private var accessibilityDescription: String {
         var parts = [title]
-        if let tag { parts.append(tag) }
         if let subtitle { parts.append(subtitle) }
         if hasReading {
             parts.append("\(MenuBarUsagePresentation.percentageText(displayPercentage)) \(showRemaining ? "remaining" : "used")")

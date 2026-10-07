@@ -58,6 +58,10 @@
 /* ==================== */
 "menubar.claude_usage" = "Claude使用状況";
 "menubar.session_usage" = "セッション使用";
+"menubar.five_hour_limit" = "5時間の上限";
+"menubar.weekly_all_models" = "週次 - すべてのモデル";
+"menubar.weekly_fable" = "週次 - Fable";
+"menubar.weekly_model" = "週次 - %@";
 "menubar.weekly_usage" = "週次";
 "menubar.opus_usage" = "Opus";
 "menubar.sonnet_usage" = "Sonnet";

@@ -58,6 +58,10 @@
 /* ==================== */
 "menubar.claude_usage" = "Використання Claude";
 "menubar.session_usage" = "Використання сесії";
+"menubar.five_hour_limit" = "Ліміт на 5 годин";
+"menubar.weekly_all_models" = "За тиждень - усі моделі";
+"menubar.weekly_fable" = "За тиждень - Fable";
+"menubar.weekly_model" = "За тиждень - %@";
 "menubar.weekly_usage" = "Тижневе";
 "menubar.opus_usage" = "Opus";
 "menubar.sonnet_usage" = "Sonnet";

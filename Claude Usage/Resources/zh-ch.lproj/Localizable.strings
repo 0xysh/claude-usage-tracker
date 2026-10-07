@@ -59,6 +59,10 @@
 /* ==================== */
 "menubar.claude_usage" = "Claude 使用情况";
 "menubar.session_usage" = "会话使用量";
+"menubar.five_hour_limit" = "5小时上限";
+"menubar.weekly_all_models" = "每周 - 所有模型";
+"menubar.weekly_fable" = "每周 - Fable";
+"menubar.weekly_model" = "每周 - %@";
 "menubar.weekly_usage" = "每周";
 "menubar.opus_usage" = "Opus";
 "menubar.sonnet_usage" = "Sonnet";

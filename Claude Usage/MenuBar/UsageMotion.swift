@@ -48,6 +48,21 @@ enum UsageMotionGeometry {
         let fraction = entranceProgress(progress, reduceMotion: reduceMotion)
         return fraction == 1 ? percentage : numeric * Double(fraction)
     }
+
+    static func counterText(currentValue: Double, targetPercentage: Double?) -> String {
+        guard let target = numericValue(targetPercentage) else { return MenuBarUsagePresentation.percentageText(nil) }
+        guard currentValue.isFinite else { return MenuBarUsagePresentation.percentageText(targetPercentage) }
+        let current = min(999, max(0, currentValue))
+        if abs(current - target) < 0.001 {
+            return MenuBarUsagePresentation.percentageText(targetPercentage)
+        }
+        return MenuBarUsagePresentation.percentageText(current)
+    }
+
+    static func counterBlur(currentValue: Double, targetValue: Double) -> CGFloat {
+        guard currentValue.isFinite, targetValue.isFinite else { return 0 }
+        return CGFloat(min(1.1, abs(currentValue - targetValue) * 0.12))
+    }
 }
 
 private struct UsageEntranceProgressKey: EnvironmentKey {
@@ -157,7 +172,30 @@ struct UsageProgressBar: View {
     }
 }
 
-/// Apple's rolling-digit transition plus a short focus pulse, scoped to the visible figure.
+/// Real per-frame interpolation, rather than a glyph transition between two endpoint strings.
+private struct CountingPercentageText: View, Animatable {
+    var value: Double
+    let targetPercentage: Double?
+
+    var animatableData: Double {
+        get { value }
+        set { value = newValue }
+    }
+
+    var body: some View {
+        let targetText = MenuBarUsagePresentation.percentageText(targetPercentage)
+        // Reserve the target's width so digit-count changes cannot move neighboring content.
+        Text(targetText)
+            .hidden()
+            .overlay(alignment: .trailing) {
+                Text(UsageMotionGeometry.counterText(currentValue: value, targetPercentage: targetPercentage))
+                    .blur(radius: UsageMotionGeometry.counterBlur(
+                        currentValue: value, targetValue: UsageMotionGeometry.numericValue(targetPercentage) ?? 0))
+            }
+    }
+}
+
+/// The visible counter shares the bar's entrance transaction; accessibility keeps the target.
 struct UsagePercentageText: View {
     let percentage: Double?
     @Environment(\.usageEntranceProgress) private var entranceProgress
@@ -172,28 +210,21 @@ struct UsagePercentageText: View {
         UsageMotionGeometry.presentedPercentage(percentage, progress: entranceProgress, reduceMotion: usesStaticPresentation)
     }
 
-    private var text: String { MenuBarUsagePresentation.percentageText(presentedPercentage) }
-
     var body: some View {
         Group {
-            if usesStaticPresentation || UsageMotionGeometry.numericValue(percentage) == nil || percentage == 0 {
+            if usesStaticPresentation || UsageMotionGeometry.numericValue(percentage) == nil {
                 Text(targetText)
             } else {
-                Text(text)
-                    .contentTransition(.numericText(value: UsageMotionGeometry.numericValue(presentedPercentage) ?? 0))
+                CountingPercentageText(value: UsageMotionGeometry.numericValue(presentedPercentage) ?? 0,
+                                       targetPercentage: percentage)
                     // Entrance changes inherit their shared 600ms transaction. Only an actual
                     // formatted reading change gets the shorter data-update transaction.
                     .animation(.easeOut(duration: UsageMotionStyle.changeDuration), value: targetText)
-                    .keyframeAnimator(initialValue: CGFloat.zero, trigger: text) { content, blur in
-                        content.blur(radius: min(1.1, max(0, blur)))
-                    } keyframes: { _ in
-                        LinearKeyframe(CGFloat(1.1), duration: 0.07)
-                        CubicKeyframe(CGFloat.zero, duration: 0.21)
-                    }
             }
         }
         .monospacedDigit()
         .fixedSize(horizontal: true, vertical: false)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(targetText)
         .transaction {
             if usesStaticPresentation {

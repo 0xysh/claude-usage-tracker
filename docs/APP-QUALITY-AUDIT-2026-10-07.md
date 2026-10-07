@@ -221,3 +221,16 @@ The actual visible usage popup confirms both accounts Fresh, Codex's inline
 credit and omitted absent session, original logos, 7pt tracks and all Claude
 quotas/controls together. Artifact details are in the design follow-up document
 and ignored personal build receipt.
+
+## Real counting and plain quota titles
+
+The user's follow-up exposed that the first numeric transition moved endpoint
+glyphs rather than counting intermediate values. The corrected scalar SwiftUI
+Animatable counter visibly counts 20 → 44 → 65 → 80 in a native window,
+synchronized with the fill, with exact sharp endpoints and static zero/unknown
+readings. Weekly capsule tags are replaced by localized regular titles:
+5-hour limit, Weekly, Weekly - all models and Weekly - Fable. All 14 existing
+languages retain their existing entries; new model-specific weekly titles follow
+the same convention. The final exact-state suite passes 379 of 381 tests,
+with 0 failures and the same two unsigned Keychain skips. Native evidence and
+final artifact details remain in USAGE-DESIGN-AND-MOTION.md.

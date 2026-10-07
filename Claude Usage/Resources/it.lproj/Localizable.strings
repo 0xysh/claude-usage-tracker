@@ -56,6 +56,10 @@
 /* ==================== */
 "menubar.claude_usage" = "Utilizzo Claude";
 "menubar.session_usage" = "Utilizzo Sessione";
+"menubar.five_hour_limit" = "Limite di 5 ore";
+"menubar.weekly_all_models" = "Settimanale - tutti i modelli";
+"menubar.weekly_fable" = "Settimanale - Fable";
+"menubar.weekly_model" = "Settimanale - %@";
 "menubar.weekly_usage" = "Settimanale";
 "menubar.opus_usage" = "Opus";
 "menubar.sonnet_usage" = "Sonnet";

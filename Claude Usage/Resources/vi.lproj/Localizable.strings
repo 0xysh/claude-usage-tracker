@@ -58,6 +58,10 @@
 /* ==================== */
 "menubar.claude_usage" = "Claude Usage";
 "menubar.session_usage" = "Mức dùng phiên";
+"menubar.five_hour_limit" = "Giới hạn 5 giờ";
+"menubar.weekly_all_models" = "Hàng tuần - tất cả các mô hình";
+"menubar.weekly_fable" = "Hàng tuần - Fable";
+"menubar.weekly_model" = "Hàng tuần - %@";
 "menubar.weekly_usage" = "Hàng tuần";
 "menubar.opus_usage" = "Opus";
 "menubar.sonnet_usage" = "Sonnet";

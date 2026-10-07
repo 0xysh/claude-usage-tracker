@@ -15,10 +15,14 @@ authentication and storage methods. Required behavior:
 4. Replace generic provider symbols with original vendor artwork. Preserve logo
    colors/proportions; the blue UI accent does not recolor OpenAI's mark.
 5. Increase quota tracks from 4 to 7 points. Replay one shared 600ms ease-out fill
-   on each popup opening. Actual reading changes settle in 280ms. Native rolling
-   digits get a restrained, finite blur pulse (maximum 1.1pt); zero/unknown values
-   stay sharp. Hover and disclosure feedback remain brief and scoped.
-6. Respect macOS Reduce Motion: immediate correct values, no sweep/roll/blur.
+   on each popup opening. Actual reading changes settle in 280ms. Percentages count through real
+   interpolated values with restrained blur (maximum 1.1pt), becoming sharp at
+   rest; measured zero and unknown values remain distinct. Hover and disclosure feedback remain brief and scoped.
+6. Use regular row titles: `5-hour limit`, Codex `Weekly`, Claude
+   `Weekly - all models` and `Weekly - Fable`. Remove Weekly capsule tags.
+   Other model-specific weekly rows follow the same plain-text convention;
+   new localized keys preserve the 14 existing languages and accessibility titles.
+7. Respect macOS Reduce Motion: immediate correct values, no sweep/roll/blur.
    VoiceOver always receives the measured target, never decorative entrance zero.
 
 Acceptance gates: synthetic light/dark renders including weekly-only Codex,
@@ -38,8 +42,14 @@ Our popup publishes its own presentation UUID rather than listening globally to
 another application's popover notifications. Native AppKit popover animation stays
 disabled because of the previously verified macOS resize-recursion defect.
 
-Rolling digits use Apple's [numericText(value:)](https://developer.apple.com/documentation/swiftui/contenttransition/numerictext(value:))
-and finite SwiftUI keyframes. No permanent animation timer or new dependency.
+The first implementation used Apple's native numericText glyph transition;
+it moved endpoint digits without counting intermediate values. The user's
+clarification exposed that mismatch. The corrected implementation uses SwiftUI
+[Animatable](https://developer.apple.com/documentation/swiftui/animatable) with
+scalar `animatableData`: each display frame formats its interpolated percentage.
+The same transaction drives the fill and counter. Reserved target text width
+keeps adjacent content stable, and blur decreases to zero at the endpoint.
+There is no permanent animation timer or new dependency.
 
 | Role | Light | Dark |
 |---|---|---|
@@ -70,7 +80,7 @@ White SHA-256: `568ce2e8701934856aaafc0ed1c3d0300f6c2ff384d0ae743dd1dea08570e12c
 Both use their original color; the asset catalog selects white in dark appearance.
 No asset is synthesized or recolored.
 
-## Validation
+## Initial motion/brand validation
 
 - Focused native UI suite: **24 passed, 0 failed, 0 skipped**, including actual
   light/dark rendering, weekly-only Codex, measured zero versus absent session,
@@ -121,3 +131,34 @@ was taken. The ignored `release/personal/BUILD-RECEIPT.md` records the artifact.
 Personal Apple Development signing is not public notarization. The existing
 PR remains a draft, unmerged; the branch is pushed with skip-CI commits.
 No new GitHub Actions runs were started.
+
+## Counting and wording follow-up
+
+The subsequent request specifies plain row titles and clarifies real counting
+rather than rolling endpoint glyphs. The first native evidence above belongs to
+the superseded glyph transition. This follow-up changes only presentation and
+localized labels. New counter regressions exercise intermediate values in both
+directions, exact/overflow endpoints, corrupt decorative frames and blur at rest.
+A fresh finite native preview compiled the corrected actual source (SHA-256
+`457c88e5ac3ef61c308060c0182af24144888a4cc72a6ce642210dddb3a3e4ae`).
+Captured entrance values **20% → 44% → 65% → 80%** and UUID replay
+**20% → 44% → 67% → 80%** match the bar's partial fill. A descending reading
+update was captured at **38% → 35%**. Intermediate values are subtly blurred;
+endpoints, measured zero and absent values are sharp. The synthetic preview
+exited itself after about 11 seconds and its exact process exit was verified.
+Evidence: `/private/tmp/usage-counting-native-evidence/verification-receipt.json`.
+Source review found no blockers in per-frame interpolation, width reservation,
+finite blur, transaction synchronization, overflow, Reduce Motion or endpoint
+accessibility. The suppression callback timing still did not establish active
+rendered-frame cancellation; this limit is unchanged and no global preference
+was altered. New labels were syntax-checked in all 14 existing locales;
+existing localization entries remain byte-for-byte unchanged.
+
+The first targeted compile found a leftover accessibility reference to the
+removed tag. It was removed, keeping the complete new title in VoiceOver.
+The final isolated local test run passes **379 of 381 tests**, with **0 failures**
+and the same **2 unsigned Keychain skips**. Result:
+`build/local-ci.3icmGJ/TestResults.xcresult`. It includes all 27 motion/palette/
+rendering tests and preserves the previously qualified provider behavior.
+Optimized universal Release and signed installation are recorded below once
+packaging completes.

@@ -2,6 +2,30 @@ import XCTest
 @testable import Claude_Usage
 
 final class UsageMotionTests: XCTestCase {
+    func testCounterShowsIntermediateValuesInBothDirectionsAndExactEndpoints() {
+        XCTAssertEqual(UsageMotionGeometry.counterText(currentValue: 17.8, targetPercentage: 80), "17%")
+        XCTAssertEqual(UsageMotionGeometry.counterText(currentValue: 42.1, targetPercentage: 80), "42%")
+        XCTAssertEqual(UsageMotionGeometry.counterText(currentValue: 64.9, targetPercentage: 35), "64%")
+        XCTAssertEqual(UsageMotionGeometry.counterText(currentValue: 80, targetPercentage: 80.8), "80%")
+        XCTAssertEqual(UsageMotionGeometry.counterText(currentValue: 0, targetPercentage: 0), "0%")
+        XCTAssertEqual(UsageMotionGeometry.counterText(currentValue: 999, targetPercentage: 1000), "999%+")
+    }
+
+    func testCounterKeepsInvalidAndMissingValuesDistinctAndBoundsDecorativeFrames() {
+        XCTAssertEqual(UsageMotionGeometry.counterText(currentValue: 17, targetPercentage: nil), "—")
+        XCTAssertEqual(UsageMotionGeometry.counterText(currentValue: .nan, targetPercentage: 80), "80%")
+        XCTAssertEqual(UsageMotionGeometry.counterText(currentValue: -10, targetPercentage: 80), "0%")
+        XCTAssertEqual(UsageMotionGeometry.counterText(currentValue: 10000, targetPercentage: 80), "999%")
+    }
+
+    func testCounterBlurIsFiniteBoundedAndSharpAtRest() {
+        XCTAssertEqual(UsageMotionGeometry.counterBlur(currentValue: 0, targetValue: 80), 1.1)
+        XCTAssertEqual(UsageMotionGeometry.counterBlur(currentValue: 79, targetValue: 80), 0.12, accuracy: 0.001)
+        XCTAssertEqual(UsageMotionGeometry.counterBlur(currentValue: 80, targetValue: 80), 0)
+        XCTAssertEqual(UsageMotionGeometry.counterBlur(currentValue: 0, targetValue: 0), 0)
+        XCTAssertEqual(UsageMotionGeometry.counterBlur(currentValue: .nan, targetValue: 80), 0)
+    }
+
     func testCorruptAndNegativePercentagesNeverProduceAnInvalidFill() {
         for percentage in [Double.nan, .infinity, -.infinity, -1] {
             XCTAssertEqual(UsageMotionGeometry.fillFraction(percentage: percentage, progress: 0.5,
