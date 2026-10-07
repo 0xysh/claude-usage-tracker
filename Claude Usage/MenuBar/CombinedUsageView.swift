@@ -104,6 +104,9 @@ struct ProfileUsageCard: View {
     let onRefresh: () -> Void
     let onPreferences: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var detailsExpanded = false
+    @State private var isHovered = false
 
     private var recoveryMessage: String {
         if profile.provider == .codex {
@@ -115,9 +118,7 @@ struct ProfileUsageCard: View {
     }
 
     private var accent: Color {
-        profile.provider == .anthropic ? .adaptiveGreen
-            : (colorScheme == .dark ? Color(red: 0.68, green: 0.66, blue: 1)
-                                   : Color(red: 0.32, green: 0.29, blue: 0.72))
+        ProviderBrandPalette.color(for: profile.provider, scheme: colorScheme)
     }
 
     var body: some View {
@@ -127,7 +128,7 @@ struct ProfileUsageCard: View {
                 refreshFailed: error != nil,
                 now: timeline.date
             )
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
@@ -148,6 +149,8 @@ struct ProfileUsageCard: View {
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(state == .fresh ? accent : Color.primary)
                             .fixedSize()
+                            .contentTransition(.opacity)
+                            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: state)
                         if let updated = profile.claudeUsage?.lastUpdated {
                             Text(updated, style: .relative)
                                 .font(.system(size: 11))
@@ -178,8 +181,13 @@ struct ProfileUsageCard: View {
                         .foregroundStyle(.secondary)
                 }
 
+                if profile.provider == .codex, let usage = profile.claudeUsage {
+                    ProviderAccountSummary(usage: usage, provider: profile.provider)
+                }
+
                 if error != nil || state == .unavailable || hasAccountDetails {
-                    DisclosureGroup(error != nil || state == .unavailable ? "Connection help" : "Account details") {
+                    DisclosureGroup(error != nil || state == .unavailable ? "Connection help" : "Account details",
+                                    isExpanded: $detailsExpanded) {
                         VStack(alignment: .leading, spacing: 8) {
                             if error != nil || state == .unavailable {
                                 Text(recoveryMessage)
@@ -190,7 +198,7 @@ struct ProfileUsageCard: View {
                                     .textSelection(.enabled)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
-                            if let usage = profile.claudeUsage {
+                            if profile.provider != .codex, let usage = profile.claudeUsage {
                                 if let plan = usage.planType {
                                     Text(plan.replacingOccurrences(of: "_", with: " ").capitalized)
                                 }
@@ -205,6 +213,7 @@ struct ProfileUsageCard: View {
                     }
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: detailsExpanded)
                 }
 
                 HStack {
@@ -222,11 +231,12 @@ struct ProfileUsageCard: View {
                 .buttonStyle(.bordered)
                 .tint(accent)
             }
-            .padding(14)
-            .background(accent.opacity(0.045), in: RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(accent.opacity(isHovered ? 0.065 : 0.045), in: RoundedRectangle(cornerRadius: 14))
             .overlay {
                 RoundedRectangle(cornerRadius: 14)
-                    .strokeBorder(Color.primary.opacity(0.09), lineWidth: 1)
+                    .strokeBorder(Color.primary.opacity(isHovered ? 0.14 : 0.09), lineWidth: 1)
             }
             .overlay(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 2)
@@ -234,11 +244,52 @@ struct ProfileUsageCard: View {
                     .frame(width: 3)
                     .padding(.vertical, 14)
             }
+            .onHover { isHovered = $0 }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: isHovered)
         }
     }
 
     private var hasAccountDetails: Bool {
-        guard let usage = profile.claudeUsage else { return false }
+        guard profile.provider != .codex, let usage = profile.claudeUsage else { return false }
         return usage.planType != nil || usage.creditsUnlimited == true || usage.creditsBalance != nil
+    }
+}
+
+/// Account metadata is immediately visible and never invents a currency for provider credits.
+struct ProviderAccountSummary: View {
+    let usage: ClaudeUsage
+    let provider: Provider
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if usage.planType != nil || usage.creditsUnlimited == true || validBalance != nil {
+            HStack(spacing: 8) {
+                if let plan = usage.planType {
+                    Text(plan.replacingOccurrences(of: "_", with: " ").capitalized)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(ProviderBrandPalette.color(for: provider, scheme: colorScheme))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(ProviderBrandPalette.color(for: provider, scheme: colorScheme).opacity(0.12),
+                                    in: Capsule())
+                }
+                Spacer(minLength: 6)
+                if usage.creditsUnlimited == true {
+                    Text("popover.credits_unlimited".localized)
+                } else if let balance = validBalance {
+                    Text("popover.credits_balance".localized(with:
+                        balance.formatted(.number.precision(.fractionLength(2)))))
+                        .monospacedDigit()
+                }
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.top, 2)
+        }
+    }
+
+    private var validBalance: Double? {
+        guard let balance = usage.creditsBalance, balance.isFinite, balance >= 0 else { return nil }
+        return balance
     }
 }

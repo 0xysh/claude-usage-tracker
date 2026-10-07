@@ -138,6 +138,99 @@ final class UsageRenderingTests: XCTestCase {
         }
     }
 
+    func testWeeklyOnlyCodexAndFullClaudeWithInlineCreditsFitOverview() throws {
+        var claude = ClaudeUsage.empty
+        claude.weeklyPercentage = 100
+        claude.fableUsageAvailable = true
+        claude.fableWeeklyPercentage = 0
+        claude.fableWeeklyResetTime = claude.weeklyResetTime
+        claude.costUsed = 7543
+        claude.costLimit = 10000
+        claude.costCurrency = "EUR"
+        var codex = ClaudeUsage.empty
+        codex.sessionUsageAvailable = false
+        codex.weeklyPercentage = 12
+        codex.planType = "pro"
+        codex.creditsBalance = 62498.61
+
+        for scheme in [ColorScheme.light, .dark] {
+            let content = VStack(spacing: 12) {
+                ProfileUsageCard(profile: Profile(name: "Codex Pro x20 · Personal", provider: .codex, claudeUsage: codex),
+                                 error: nil, showRemaining: false, isRefreshing: false,
+                                 onRefresh: {}, onPreferences: {})
+                ProfileUsageCard(profile: Profile(name: "Claude Max x20 · Personal", claudeUsage: claude),
+                                 error: nil, showRemaining: false, isRefreshing: false,
+                                 onRefresh: {}, onPreferences: {})
+            }
+            .padding(12)
+            .frame(width: 360)
+            .background(scheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color.white)
+            .environment(\.colorScheme, scheme)
+            .environment(\.usageMotionAllowed, false)
+            let image = try XCTUnwrap(ImageRenderer(content: content).nsImage)
+            XCTAssertLessThanOrEqual(image.size.height + 120, 680)
+            try retain(image, name: "weekly-only-credit-\(scheme == .dark ? "dark" : "light")")
+        }
+    }
+
+    func testMissingCodexSessionIsOmittedButMeasuredZeroRemains() throws {
+        var usage = ClaudeUsage.empty
+        usage.sessionPercentage = 0
+        usage.weeklyPercentage = 12
+        func height(_ reading: ClaudeUsage, provider: Provider) throws -> CGFloat {
+            let content = SmartUsageDashboard(usage: reading, apiUsage: nil, provider: provider,
+                                             showRemainingOverride: false, compactLayout: true)
+                .frame(width: 320)
+                .environment(\.usageMotionAllowed, false)
+            return try XCTUnwrap(ImageRenderer(content: content).nsImage).size.height
+        }
+        let measuredZero = try height(usage, provider: .codex)
+        usage.sessionUsageAvailable = false
+        let missing = try height(usage, provider: .codex)
+        XCTAssertGreaterThan(measuredZero - missing, 35, "A real zero still has a session row.")
+        XCTAssertGreaterThan(try height(usage, provider: .anthropic) - missing, 35,
+                             "Claude's existing unavailable-state explanation remains visible.")
+    }
+
+    func testCreditSummaryIsVisibleWithoutDisclosureAndHandlesProviderUnits() throws {
+        for scheme in [ColorScheme.light, .dark] {
+            for balance in [0.0, 62498.61, Double.infinity, Double.nan] {
+                var usage = ClaudeUsage.empty
+                usage.creditsBalance = balance
+                let content = ProviderAccountSummary(usage: usage, provider: .codex)
+                    .frame(width: 320)
+                    .environment(\.colorScheme, scheme)
+                let image = ImageRenderer(content: content).nsImage
+                if balance.isFinite {
+                    XCTAssertGreaterThan(try XCTUnwrap(image).size.height, 10)
+                    try retain(try XCTUnwrap(image), name: "credit-\(scheme)-\(balance == 0 ? "zero" : "balance")")
+                } else {
+                    XCTAssertTrue(image == nil || image?.size.height == 0, "Invalid credit is never displayed as a balance.")
+                }
+            }
+            var unlimited = ClaudeUsage.empty
+            unlimited.creditsUnlimited = true
+            let image = try XCTUnwrap(ImageRenderer(content: ProviderAccountSummary(usage: unlimited, provider: .codex)
+                .frame(width: 320).environment(\.colorScheme, scheme)).nsImage)
+            XCTAssertGreaterThan(image.size.height, 10)
+            try retain(image, name: "credit-\(scheme)-unlimited")
+        }
+    }
+
+    func testOriginalProviderArtworkIsBundledAndRendersInBothAppearances() throws {
+        for provider in Provider.allCases {
+            XCTAssertNotNil(NSImage(named: provider.descriptor.logoAssetName), "Original artwork must replace the symbol fallback.")
+            for scheme in [ColorScheme.light, .dark] {
+                let image = try XCTUnwrap(ImageRenderer(content: ProviderLogoView(provider: provider, size: 32)
+                    .padding(8).background(scheme == .dark ? Color.black : Color.white)
+                    .environment(\.colorScheme, scheme)).nsImage)
+                XCTAssertEqual(image.size.width, 48)
+                XCTAssertEqual(image.size.height, 48)
+                try retain(image, name: "logo-\(provider.rawValue)-\(scheme)")
+            }
+        }
+    }
+
     private func retain(_ image: NSImage, name: String) throws {
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let data = try XCTUnwrap(image.tiffRepresentation)

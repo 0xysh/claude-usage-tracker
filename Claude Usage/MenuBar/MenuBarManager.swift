@@ -10,6 +10,7 @@ class MenuBarManager: NSObject, ObservableObject {
     @Published private(set) var status: ClaudeStatus = .unknown
     @Published private(set) var apiUsage: APIUsage?
     @Published private(set) var isRefreshing: Bool = false
+    @Published private(set) var popoverPresentationID = UUID()
     @Published private(set) var refreshingProfileIDs: Set<UUID> = []
 
     // Error tracking for stale data / credential banners
@@ -654,6 +655,7 @@ class MenuBarManager: NSObject, ObservableObject {
     /// Shows `popover` anchored to a status bar button and gives its backing window
     /// the Space placement a menu bar popover needs to appear over a full-screen app.
     private func showPopover(_ popover: NSPopover, from button: NSStatusBarButton) {
+        popoverPresentationID = UUID()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         if let window = popover.contentViewController?.view.window {
             window.enableDisplayOnFullScreenSpaces()

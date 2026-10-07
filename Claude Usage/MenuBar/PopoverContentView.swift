@@ -107,21 +107,24 @@ struct PopoverContentView: View {
     }
 
     var body: some View {
-        if showAllProfiles {
-            CombinedUsageView(
-                profiles: profileManager.profiles.filter(\.isSelectedForDisplay),
-                errors: manager.profileRefreshErrors,
-                isRefreshing: manager.isRefreshing,
-                refreshingProfileIDs: manager.refreshingProfileIDs,
-                onRefresh: onRefresh,
-                onPreferences: onPreferences,
-                onRefreshProfile: manager.refreshProfile,
-                onConfigureProfile: manager.configureProfile
-            )
-            .background(VisualEffectBackground())
-        } else {
-            individualProfileContent
+        Group {
+            if showAllProfiles {
+                CombinedUsageView(
+                    profiles: profileManager.profiles.filter(\.isSelectedForDisplay),
+                    errors: manager.profileRefreshErrors,
+                    isRefreshing: manager.isRefreshing,
+                    refreshingProfileIDs: manager.refreshingProfileIDs,
+                    onRefresh: onRefresh,
+                    onPreferences: onPreferences,
+                    onRefreshProfile: manager.refreshProfile,
+                    onConfigureProfile: manager.configureProfile
+                )
+                .background(VisualEffectBackground())
+            } else {
+                individualProfileContent
+            }
         }
+        .modifier(UsagePresentationMotion(presentationID: manager.popoverPresentationID))
     }
 
     private var individualProfileContent: some View {
@@ -571,6 +574,7 @@ struct HeaderIconButton: View {
     let action: () -> Void
 
     @State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
@@ -597,7 +601,7 @@ struct HeaderIconButton: View {
         .accessibilityLabel(icon == "gearshape.fill" ? "Settings" : "Refresh usage")
         .disabled(isRefreshing)
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) {
                 isHovered = hovering
             }
         }
@@ -652,20 +656,22 @@ struct SmartUsageDashboard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: compactLayout ? 4 : 6) {
-            // Primary: Session Usage
-            UsageRow(
-                title: "menubar.session_usage".localized,
-                subtitle: "menubar.5_hour_window".localized,
-                usedPercentage: readingState == .fresh ? usage.effectiveSessionPercentage : usage.sessionPercentage,
-                showRemaining: showRemainingPercentage,
-                resetTime: usage.sessionResetTime,
-                periodDuration: Constants.sessionWindow,
-                showTimeMarker: showTimeMarker,
-                showPaceMarker: showPaceMarker,
-                usePaceColoring: usePaceColoring,
-                timeDisplay: timeDisplay,
-                isAvailable: usage.hasSessionUsage
-            )
+            // A provider's absent window is not a measured zero or a plan-based assumption.
+            if provider != .codex || usage.hasSessionUsage {
+                UsageRow(
+                    title: "menubar.session_usage".localized,
+                    subtitle: "menubar.5_hour_window".localized,
+                    usedPercentage: readingState == .fresh ? usage.effectiveSessionPercentage : usage.sessionPercentage,
+                    showRemaining: showRemainingPercentage,
+                    resetTime: usage.sessionResetTime,
+                    periodDuration: Constants.sessionWindow,
+                    showTimeMarker: showTimeMarker,
+                    showPaceMarker: showPaceMarker,
+                    usePaceColoring: usePaceColoring,
+                    timeDisplay: timeDisplay,
+                    isAvailable: usage.hasSessionUsage
+                )
+            }
 
             if usage.designWeeklyTokensUsed > 0 {
                 UsageRow(
@@ -759,31 +765,8 @@ struct SmartUsageDashboard: View {
                 }
             }
 
-            // Plan / credits (providers that report them, e.g. Codex)
-            if !compactLayout && (usage.planType != nil || usage.creditsUnlimited == true || usage.creditsBalance != nil) {
-                HStack(spacing: 6) {
-                    if let plan = usage.planType {
-                        Text(plan.replacingOccurrences(of: "_", with: " ").capitalized)
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.accentColor)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(Color.accentColor.opacity(0.12)))
-                    }
-
-                    Spacer()
-
-                    if usage.creditsUnlimited == true {
-                        Text("popover.credits_unlimited".localized)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.adaptiveGreen)
-                    } else if let balance = usage.creditsBalance {
-                        Text("popover.credits_balance".localized(with: String(format: "%.2f", balance)))
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .padding(.top, 2)
+            if !compactLayout {
+                ProviderAccountSummary(usage: usage, provider: provider)
             }
 
             // API Usage (console-billing providers only)
@@ -839,7 +822,6 @@ struct UsageRow: View {
     var isAvailable: Bool = true
     @Environment(\.usageReadingState) private var readingState
     @Environment(\.usageCompactLayout) private var compactLayout
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var hasReading: Bool { isAvailable && usedPercentage.isFinite && usedPercentage >= 0 }
 
@@ -936,34 +918,15 @@ struct UsageRow: View {
 
                 Spacer()
 
-                Text(MenuBarUsagePresentation.percentageText(hasReading ? displayPercentage : nil))
+                UsagePercentageText(percentage: hasReading ? displayPercentage : nil)
                     .font(.system(size: 20, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
                     .foregroundColor(statusColor)
             }
 
             // Progress bar
             if hasReading {
-              GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2.5)
-                        .fill(Color.primary.opacity(0.08))
-
-                    RoundedRectangle(cornerRadius: 2.5)
-                        .fill(statusColor)
-                        .frame(width: geometry.size.width * min(displayPercentage / 100.0, 1.0))
-                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: displayPercentage)
-                }
-                .overlay(alignment: .leading) {
-                    if let fraction = timeMarkerFraction {
-                        RoundedRectangle(cornerRadius: 1)
-                            .fill(timeMarkerColor)
-                            .frame(width: 2.5, height: 8)
-                            .offset(x: round(geometry.size.width * fraction) - 0.75)
-                    }
-                }
-            }
-            .frame(height: 4)
+                UsageProgressBar(percentage: displayPercentage, color: statusColor,
+                                 markerFraction: timeMarkerFraction, markerColor: timeMarkerColor)
             } else if !compactLayout {
                 Text("No quota reported")
                     .font(.system(size: 11))
@@ -1463,24 +1426,13 @@ struct APIUsageCard: View {
 
                 Spacer()
 
-                Text("\(Int(displayPercentage))%")
+                UsagePercentageText(percentage: displayPercentage)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundColor(usageColor)
             }
 
             // Progress bar
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2.5)
-                        .fill(Color.primary.opacity(0.08))
-
-                    RoundedRectangle(cornerRadius: 2.5)
-                        .fill(usageColor)
-                        .frame(width: geometry.size.width * min(displayPercentage / 100.0, 1.0))
-                        .animation(.easeInOut(duration: 0.6), value: displayPercentage)
-                }
-            }
-            .frame(height: 4)
+            UsageProgressBar(percentage: displayPercentage, color: usageColor)
 
             // Used / Remaining
             HStack {

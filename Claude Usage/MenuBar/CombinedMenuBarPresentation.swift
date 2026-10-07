@@ -85,10 +85,6 @@ extension MenuBarIconRenderer {
         defer { image.unlockFocus() }
         let foreground = isDarkMode ? NSColor.white : NSColor.black
         let secondary = foreground.withAlphaComponent(isDarkMode ? 0.72 : 0.62)
-        let claude = isDarkMode ? NSColor(red: 0.27, green: 0.84, blue: 0.68, alpha: 1)
-                               : NSColor(red: 0.06, green: 0.47, blue: 0.33, alpha: 1)
-        let codex = isDarkMode ? NSColor(red: 0.45, green: 0.65, blue: 1, alpha: 1)
-                              : NSColor(red: 0.17, green: 0.36, blue: 0.75, alpha: 1)
         let warning = isDarkMode ? NSColor(red: 1, green: 0.73, blue: 0.29, alpha: 1)
                                 : NSColor(red: 0.65, green: 0.36, blue: 0.04, alpha: 1)
         let critical = isDarkMode ? NSColor(red: 1, green: 0.40, blue: 0.37, alpha: 1)
@@ -110,7 +106,8 @@ extension MenuBarIconRenderer {
                 x += CombinedMenuBarPresentation.separatorWidth
             }
             let width = CombinedMenuBarPresentation.width(for: segment)
-            let accent = config.useSystemColor ? foreground : (segment.provider == .anthropic ? claude : codex)
+            let accent = config.useSystemColor ? foreground
+                : ProviderBrandPalette.accent(for: segment.provider, isDarkMode: isDarkMode)
             draw(segment.title, x: x, font: CombinedMenuBarPresentation.nameFont, color: accent)
             var next = x + CombinedMenuBarPresentation.textWidth(segment.title, font: CombinedMenuBarPresentation.nameFont) + 5
             if !segment.period.isEmpty {

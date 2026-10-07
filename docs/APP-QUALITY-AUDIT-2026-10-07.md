@@ -203,3 +203,14 @@ response, not the reference screenshot. Browser login succeeded for the user's
 personal organization; this does not prove acceptance for every login method.
 VoiceOver traversal, detached-window interaction, long heavy-load stability and
 public release/notarization remain unqualified by these checks.
+
+## Motion, brand and inline-credit follow-up
+
+The subsequent scoped design request keeps the same provider-reading methods.
+Its plan, original artwork provenance, color roles, native motion evidence and
+local qualification are in [USAGE-DESIGN-AND-MOTION.md](USAGE-DESIGN-AND-MOTION.md).
+Codex credits are now immediately visible and a missing Codex session is omitted;
+the earlier collapsed-account-metadata layout finding is superseded by this
+validated inline summary. Quota health colors remain distinct from provider
+identity. The new final local gate passes 376 of 378 tests, with only the same
+two unsigned Keychain skips, and optimized universal Release passes.
