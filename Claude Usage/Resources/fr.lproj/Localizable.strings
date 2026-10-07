@@ -870,16 +870,16 @@
 /* MARK: - Mobile App (Coming Soon) */
 /* ==================== */
 "section.mobile_app_title" = "App Mobile";
-"section.mobile_app_desc" = "App mobile bientôt disponible";
+"section.mobile_app_desc" = "Intérêt pour une app mobile";
 "mobile.title" = "App Mobile";
-"mobile.subtitle" = "Suivez votre utilisation de Claude en déplacement";
-"mobile.coming_soon_badge" = "BIENTÔT DISPONIBLE";
-"mobile.cta_message" = "Intéressé ? Faites-le nous savoir et nous vous préviendrons quand ce sera prêt.";
-"mobile.notify_me" = "Me notifier";
+"mobile.subtitle" = "Une éventuelle app complémentaire pour votre utilisation";
+"mobile.coming_soon_badge" = "À L’ÉTUDE";
+"mobile.cta_message" = "Enregistrez votre intérêt sur ce Mac. Aucune date de sortie ni aucun service de notification ne sont prévus.";
+"mobile.notify_me" = "Enregistrer l’intérêt localement";
 "mobile.submitting" = "Envoi...";
-"mobile.notified" = "Vous êtes sur la liste !";
-"mobile.notified_desc" = "Nous vous informerons quand l'app mobile sera disponible.";
-"mobile.privacy_note" = "Aucune donnée personnelle n'est collectée. Cela enregistre uniquement votre intérêt.";
+"mobile.notified" = "Intérêt enregistré sur ce Mac";
+"mobile.notified_desc" = "Cette préférence locale ne vous inscrit à aucune notification.";
+"mobile.privacy_note" = "Rien n’est envoyé. Cette préférence reste sur ce Mac.";
 "mobile.error_title" = "Échec de la requête";
 "mobile.error_message" = "Impossible d'enregistrer votre intérêt. Vérifiez votre connexion internet et réessayez.";
 
@@ -913,13 +913,13 @@
 "feedback.title_label" = "Rôle";
 "feedback.contact_placeholder" = "Email";
 "feedback.message_placeholder" = "Dites-nous tout — avis, idées, suggestions...";
-"feedback.submit" = "Envoyer";
+"feedback.submit" = "Ouvrir un brouillon GitHub";
 "feedback.submitting" = "Envoi...";
 "feedback.remind_later" = "Me Rappeler Plus Tard";
 "feedback.never_show" = "Ne Plus Demander";
 "feedback.thanks" = "Merci pour votre retour !";
-"feedback.error_title" = "Échec de l'Envoi";
-"feedback.error_message" = "Impossible d'envoyer votre retour. Réessayez plus tard.";
+"feedback.error_title" = "Impossible d’ouvrir le brouillon";
+"feedback.error_message" = "Votre message est toujours ici. Réessayez ou ouvrez votre fork manuellement sur GitHub.";
 "feedback.role_developer" = "Développeur";
 "feedback.role_designer" = "Designer";
 "feedback.role_manager" = "Manager";
@@ -1071,3 +1071,12 @@
 "support.popup_signature" = "l'équipe d'une seule personne derrière Claude Usage";
 "support.popup_body" = "Gratuit, open source, fait par une seule personne — sans pubs ni pistage. Si Claude Usage vous a déjà évité de griller une limite de session, un café le fait vivre.";
 "support.popup_days" = "Veille sur vos limites depuis %d jours — toujours gratuit";
+
+// Personal fork: reviewable feedback drafts and local mobile interest
+"mobile.clear_interest" = "Effacer l’intérêt local";
+"feedback.public_issue_notice" = "Un brouillon s’ouvre dans un dépôt GitHub public. Vérifiez-le avant de le publier. N’incluez aucun identifiant ni renseignement personnel.";
+"feedback.draft_opened" = "Continuer dans le navigateur";
+"feedback.draft_opened_desc" = "Vérifiez le brouillon et publiez-le vous-même sur GitHub. L’app n’a pas publié votre avis.";
+"feedback.edit_draft" = "Revenir au message";
+"feedback.draft_too_long" = "Ce message est trop long pour un brouillon dans le navigateur. Raccourcissez-le ou ouvrez un brouillon GitHub vide et collez-y votre message vous-même. Votre texte reste ici.";
+"feedback.open_empty_draft" = "Ouvrir un brouillon GitHub vide";

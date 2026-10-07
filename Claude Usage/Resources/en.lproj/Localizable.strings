@@ -900,16 +900,16 @@
 /* MARK: - Mobile App (Coming Soon) */
 /* ==================== */
 "section.mobile_app_title" = "Mobile App";
-"section.mobile_app_desc" = "Mobile app coming soon";
+"section.mobile_app_desc" = "Mobile app interest";
 "mobile.title" = "Mobile App";
-"mobile.subtitle" = "Track your Claude usage on the go";
-"mobile.coming_soon_badge" = "COMING SOON";
-"mobile.cta_message" = "Interested? Let us know and we'll notify you when it's ready.";
-"mobile.notify_me" = "Notify Me";
+"mobile.subtitle" = "A possible companion app for your usage";
+"mobile.coming_soon_badge" = "UNDER CONSIDERATION";
+"mobile.cta_message" = "Save your interest on this Mac. There is no release date or notification service.";
+"mobile.notify_me" = "Save interest locally";
 "mobile.submitting" = "Submitting...";
-"mobile.notified" = "You're on the list!";
-"mobile.notified_desc" = "We'll let you know when the mobile app is available.";
-"mobile.privacy_note" = "No personal data is collected. This only registers your interest.";
+"mobile.notified" = "Interest saved on this Mac";
+"mobile.notified_desc" = "This local preference does not sign you up for notifications.";
+"mobile.privacy_note" = "Nothing is sent. This preference stays on this Mac.";
 "mobile.error_title" = "Request Failed";
 "mobile.error_message" = "Could not register your interest. Please check your internet connection and try again.";
 
@@ -943,13 +943,13 @@
 "feedback.title_label" = "Role";
 "feedback.contact_placeholder" = "Email";
 "feedback.message_placeholder" = "Tell us anything — feedback, ideas, feature requests...";
-"feedback.submit" = "Submit";
+"feedback.submit" = "Open GitHub draft";
 "feedback.submitting" = "Sending...";
 "feedback.remind_later" = "Remind Me Later";
 "feedback.never_show" = "Don't Ask Again";
 "feedback.thanks" = "Thanks for your feedback!";
-"feedback.error_title" = "Submission Failed";
-"feedback.error_message" = "Could not send your feedback. Please try again later.";
+"feedback.error_title" = "Could Not Open Draft";
+"feedback.error_message" = "Your message is still here. Try again, or open your fork on GitHub manually.";
 "feedback.role_developer" = "Developer";
 "feedback.role_designer" = "Designer";
 "feedback.role_manager" = "Manager";
@@ -1089,3 +1089,12 @@
 "support.popup_signature" = "the one-person team behind Claude Usage";
 "support.popup_body" = "Free, open source, built by one person — no ads, no tracking. If it has ever saved you from burning a session limit, a coffee keeps it going.";
 "support.popup_days" = "Watching your limits for %d days — always free";
+
+// Personal fork: reviewable feedback drafts and local mobile interest
+"mobile.clear_interest" = "Clear local interest";
+"feedback.public_issue_notice" = "This opens a draft in a public GitHub repository. Review before publishing. Keep credentials and personal details out.";
+"feedback.draft_opened" = "Continue in your browser";
+"feedback.draft_opened_desc" = "Review the draft and publish it yourself on GitHub. The app has not published your feedback.";
+"feedback.edit_draft" = "Return to message";
+"feedback.draft_too_long" = "This message is too long for a browser draft. Shorten it, or open an empty GitHub draft and paste your message manually. Your text stays here.";
+"feedback.open_empty_draft" = "Open empty GitHub draft";

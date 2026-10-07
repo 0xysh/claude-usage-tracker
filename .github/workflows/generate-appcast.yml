@@ -6,208 +6,182 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag to generate appcast for (e.g., v1.7.0)'
+        description: 'Release tag to generate appcast for (blank selects the latest release)'
         required: false
         type: string
+
+concurrency:
+  group: personal-appcast-pages
+  cancel-in-progress: false
 
 jobs:
   generate-appcast:
     runs-on: macos-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
 
     steps:
-      - name: Determine Release Tag
-        id: release_tag
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ -n "${{ inputs.release_tag }}" ]; then
-              TAG="${{ inputs.release_tag }}"
-            else
-              # Get latest release tag
-              TAG=$(gh api repos/${{ github.repository }}/releases/latest --jq '.tag_name')
-            fi
-          else
-            TAG="${{ github.event.release.tag_name }}"
-          fi
-
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "Processing release: ${TAG}"
+      - name: Determine release and publishing URLs
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUESTED_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          RELEASE_TAG="$REQUESTED_TAG"
+          if [ -z "$RELEASE_TAG" ]; then
+            RELEASE_TAG=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')
+          fi
+          # Limit tags to version identifiers before using them in file paths.
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+(\.[0-9]+){1,3}([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tag must be a version such as v3.3.1."
+            exit 1
+          fi
+          PAGES_OWNER=$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          PAGES_BASE_URL="https://$PAGES_OWNER.github.io/${GITHUB_REPOSITORY#*/}"
+          printf 'RELEASE_TAG=%s\nPAGES_BASE_URL=%s\n' "$RELEASE_TAG" "$PAGES_BASE_URL" >> "$GITHUB_ENV"
 
-      - name: Checkout gh-pages
+      - name: Checkout publishing repository
         uses: actions/checkout@v4
         with:
-          ref: gh-pages
-          fetch-depth: 0
-          token: ${{ secrets.RELEASE_TOKEN }}
+          ref: ${{ github.event.repository.default_branch }}
+          path: site
 
-      - name: Download Sparkle Tools
+      - name: Read expected public update identity
+        working-directory: site
         run: |
-          echo "Downloading Sparkle 2.8.1 tools..."
-          curl -L -o sparkle.tar.xz \
-            https://github.com/sparkle-project/Sparkle/releases/download/2.8.1/Sparkle-2.8.1.tar.xz
+          set -euo pipefail
+          PUBLIC_KEY=$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' 'Claude Usage/Resources/Info.plist')
+          if [[ ! "$PUBLIC_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+            echo "::error::The personal app must have a valid Sparkle public key."
+            exit 1
+          fi
+          printf 'EXPECTED_SPARKLE_PUBLIC_KEY=%s\n' "$PUBLIC_KEY" >> "$GITHUB_ENV"
 
-          echo "Extracting Sparkle tools..."
-          tar -xf sparkle.tar.xz
-          chmod +x bin/generate_appcast
-
-          echo "Sparkle tools version:"
-          ./bin/generate_appcast --help | head -5
-
-          echo "✅ Sparkle tools ready"
-
-      - name: Download Release Asset
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Restore or initialize gh-pages
+        working-directory: site
         run: |
-          # Create releases directory if it doesn't exist
+          set -euo pipefail
+          PUBLISHING_REF=$(git ls-remote --heads origin refs/heads/gh-pages)
+          if [ -n "$PUBLISHING_REF" ]; then
+            git fetch origin refs/heads/gh-pages:refs/remotes/origin/gh-pages
+            git switch --create gh-pages --track origin/gh-pages
+          else
+            # An orphan branch has no main history or tracked source files.
+            git switch --orphan gh-pages
+          fi
           mkdir -p releases
+          touch .nojekyll
 
-          # Download the release asset
-          echo "Downloading release: ${{ steps.release_tag.outputs.tag }}"
-          gh release download "${{ steps.release_tag.outputs.tag }}" \
-            -p "Claude-Usage.zip" \
-            -D releases/ \
-            --clobber
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
 
-          # Verify download
-          if [ ! -f "releases/Claude-Usage.zip" ]; then
-            echo "❌ Error: Failed to download Claude-Usage.zip"
-            exit 1
-          fi
-
-          FILE_SIZE=$(stat -f%z "releases/Claude-Usage.zip")
-          echo "Downloaded file size: ${FILE_SIZE} bytes"
-
-          if [ "$FILE_SIZE" -lt 1000000 ]; then
-            echo "❌ Error: File too small (${FILE_SIZE} bytes), likely corrupted"
-            exit 1
-          fi
-
-          echo "✅ Release asset downloaded successfully"
-
-      - name: Extract App for Version Info
-        run: |
-          echo "Extracting app to read version info..."
-
-          # Unzip to temporary directory
-          unzip -q releases/Claude-Usage.zip -d releases/temp
-
-          # Extract version from app bundle
-          VERSION=$(defaults read "$(pwd)/releases/temp/Claude Usage.app/Contents/Info.plist" CFBundleShortVersionString)
-          BUILD=$(defaults read "$(pwd)/releases/temp/Claude Usage.app/Contents/Info.plist" CFBundleVersion)
-          MIN_OS=$(defaults read "$(pwd)/releases/temp/Claude Usage.app/Contents/Info.plist" LSMinimumSystemVersion)
-
-          echo "Detected version: $VERSION (build $BUILD)"
-          echo "Minimum macOS: $MIN_OS"
-
-          echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
-          echo "APP_BUILD=$BUILD" >> $GITHUB_ENV
-          echo "MIN_OS=$MIN_OS" >> $GITHUB_ENV
-
-          # Clean up temp extraction
-          rm -rf releases/temp
-
-          echo "✅ Version info extracted"
-
-      - name: Download Previous Releases for Delta Updates
+      - name: Download and verify Sparkle tools
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
+          SPARKLE_VERSION: '2.10.0'
+          # Official GitHub release asset digest, verified on 2026-10-07.
+          SPARKLE_SHA256: c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c
         run: |
-          echo "Downloading previous releases for delta update generation..."
+          set -euo pipefail
+          TOOLS_DIR="$RUNNER_TEMP/sparkle-tools"
+          mkdir -p "$TOOLS_DIR"
+          ARCHIVE="$TOOLS_DIR/Sparkle-$SPARKLE_VERSION.tar.xz"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --output "$ARCHIVE" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz"
+          printf '%s  %s\n' "$SPARKLE_SHA256" "$ARCHIVE" | shasum -a 256 -c -
+          tar -xf "$ARCHIVE" -C "$TOOLS_DIR"
+          printf 'SPARKLE_TOOLS_DIR=%s\n' "$TOOLS_DIR" >> "$GITHUB_ENV"
 
-          # Get list of recent releases (last 5 for delta generation)
-          RELEASES=$(gh api repos/${{ github.repository }}/releases --jq '.[0:5] | .[] | .tag_name' | grep -v "${{ steps.release_tag.outputs.tag }}" || true)
-
-          if [ -z "$RELEASES" ]; then
-            echo "No previous releases found. Skipping delta generation."
-            exit 0
+      - name: Download and verify our release
+        run: |
+          set -euo pipefail
+          RELEASE_DIR="$RUNNER_TEMP/personal-release"
+          mkdir -p "$RELEASE_DIR"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern Claude-Usage.zip --pattern Claude-Usage.zip.sha256 \
+            --dir "$RELEASE_DIR"
+          cd "$RELEASE_DIR"
+          shasum -a 256 -c Claude-Usage.zip.sha256
+          unzip -q Claude-Usage.zip -d extracted
+          APP_PATH="$RELEASE_DIR/extracted/Claude Usage.app"
+          codesign --verify --deep --strict "$APP_PATH"
+          xcrun stapler validate "$APP_PATH"
+          APP_FEED=$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$APP_PATH/Contents/Info.plist")
+          APP_KEY=$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP_PATH/Contents/Info.plist")
+          if [ "$APP_FEED" != "$PAGES_BASE_URL/appcast.xml" ] || [ "$APP_KEY" != "$EXPECTED_SPARKLE_PUBLIC_KEY" ]; then
+            echo "::error::The release must bundle this fork's update feed and public key."
+            exit 1
           fi
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist")
+          # Keep older archives so Sparkle can still generate delta updates.
+          cp Claude-Usage.zip "$GITHUB_WORKSPACE/site/releases/Claude-Usage-$RELEASE_TAG.zip"
+          printf 'APP_VERSION=%s\n' "$VERSION" >> "$GITHUB_ENV"
 
-          # Note: We skip downloading previous releases since we keep them in gh-pages
-          # Sparkle will use the files already in the releases/ directory from previous workflow runs
-          echo "ℹ️  Previous releases are already in gh-pages releases/ directory"
-          echo "✅ Using existing files for delta generation"
-
-      - name: Generate Appcast
+      - name: Generate signed appcast
+        working-directory: site
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
-          echo "Generating appcast for version ${{ env.APP_VERSION }}..."
-
-          # IMPORTANT: Pipe private key via stdin for security (don't write to disk)
-          # This prevents the private key from ever being written to the filesystem
-          # Use gh-pages URL for downloads (more reliable than GitHub releases)
-          echo "$SPARKLE_PRIVATE_KEY" | ./bin/generate_appcast \
+          set -euo pipefail
+          if [ -z "${SPARKLE_PRIVATE_KEY:-}" ]; then
+            echo "::error::Configure this fork's SPARKLE_PRIVATE_KEY before publishing updates."
+            exit 1
+          fi
+          # The matching public key must be bundled in the personal app.
+          # Keep the private key out of files and command-line arguments.
+          printf '%s\n' "$SPARKLE_PRIVATE_KEY" | "$SPARKLE_TOOLS_DIR/bin/generate_appcast" \
             --ed-key-file - \
-            --download-url-prefix "https://hamed-elfayome.github.io/Claude-Usage-Tracker/releases/" \
+            --download-url-prefix "$PAGES_BASE_URL/releases/" \
             --maximum-deltas 5 \
             --maximum-versions 10 \
             releases/
+          mv releases/appcast.xml appcast.xml
 
-          # Move appcast to root
-          mv releases/appcast.xml ./
-
-          echo "✅ Appcast generated successfully!"
-
-      - name: Display Appcast Preview
+      - name: Commit publishing branch
+        working-directory: site
         run: |
-          echo "=== Generated Appcast Preview ==="
-          echo ""
-
-          # Show the latest item in the appcast
-          if command -v xmllint &> /dev/null; then
-            xmllint --format appcast.xml | head -50
-          else
-            head -50 appcast.xml
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add .nojekyll appcast.xml releases/
+          if ! git diff --staged --quiet; then
+            git commit -m "Update appcast for $RELEASE_TAG (v$APP_VERSION)"
+            # Explicit destination, no force push, and never the main branch.
+            git push origin HEAD:refs/heads/gh-pages
           fi
 
-          echo ""
-          echo "Latest version in appcast: ${{ env.APP_VERSION }}"
-          echo "Release tag: ${{ steps.release_tag.outputs.tag }}"
-
-      - name: Commit and Push
+      # GITHUB_TOKEN pushes do not trigger branch-based Pages builds. Deploy
+      # explicitly while retaining gh-pages as the archive/history store.
+      - name: Prepare public Pages files
+        working-directory: site
         run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
+          set -euo pipefail
+          PUBLIC_DIR="$RUNNER_TEMP/personal-pages"
+          mkdir -p "$PUBLIC_DIR"
+          cp .nojekyll appcast.xml "$PUBLIC_DIR/"
+          cp -R releases "$PUBLIC_DIR/"
+          printf 'PAGES_ARTIFACT_DIR=%s\n' "$PUBLIC_DIR" >> "$GITHUB_ENV"
 
-          git add appcast.xml releases/
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ${{ env.PAGES_ARTIFACT_DIR }}
 
-          # Check if there are changes to commit
-          if git diff --staged --quiet; then
-            echo "ℹ️  No changes to commit (appcast already up to date)"
-            exit 0
-          fi
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
 
-          # Commit and push
-          git commit -m "Update appcast for ${{ steps.release_tag.outputs.tag }} (v${{ env.APP_VERSION }})"
-          git push
-
-          echo "✅ Appcast published to GitHub Pages!"
-
-      - name: Verify GitHub Pages Deployment
+      - name: Verify appcast is accessible
         run: |
-          echo "Waiting for GitHub Pages to deploy..."
-          sleep 30
-
-          echo "Verifying appcast URL is accessible..."
-          APPCAST_URL="https://hamed-elfayome.github.io/Claude-Usage-Tracker/appcast.xml"
-
-          if curl -f -s "$APPCAST_URL" > /dev/null; then
-            echo "✅ Appcast is live at: $APPCAST_URL"
-          else
-            echo "⚠️  Appcast URL not yet accessible (GitHub Pages may take 1-2 minutes to deploy)"
-            echo "Check manually: $APPCAST_URL"
-          fi
-
-      - name: Summary
-        run: |
-          echo "🎉 Appcast generation complete!"
-          echo ""
-          echo "📦 Release: ${{ steps.release_tag.outputs.tag }}"
-          echo "📱 Version: ${{ env.APP_VERSION }}"
-          echo "🔗 Appcast URL: https://hamed-elfayome.github.io/Claude-Usage-Tracker/appcast.xml"
-          echo ""
-          echo "ℹ️  Users with automatic updates enabled will be notified within 24 hours"
+          set -euo pipefail
+          APPCAST_URL="$PAGES_BASE_URL/appcast.xml"
+          curl --fail --location --retry 5 --retry-delay 5 \
+            --proto '=https' --tlsv1.2 --output /dev/null "$APPCAST_URL"
+          printf 'Published signed updates for %s: %s\n' "$RELEASE_TAG" "$APPCAST_URL"

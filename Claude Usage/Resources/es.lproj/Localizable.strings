@@ -873,16 +873,16 @@
 /* MARK: - Mobile App (Coming Soon) */
 /* ==================== */
 "section.mobile_app_title" = "App Móvil";
-"section.mobile_app_desc" = "App móvil próximamente";
+"section.mobile_app_desc" = "Interés en la app móvil";
 "mobile.title" = "App Móvil";
-"mobile.subtitle" = "Controla tu uso de Claude donde estés";
-"mobile.coming_soon_badge" = "PRÓXIMAMENTE";
-"mobile.cta_message" = "¿Te interesa? Haznos saber y te notificaremos cuando esté listo.";
-"mobile.notify_me" = "Notifícame";
+"mobile.subtitle" = "Una posible app complementaria para tu uso";
+"mobile.coming_soon_badge" = "EN CONSIDERACIÓN";
+"mobile.cta_message" = "Guarda tu interés en este Mac. No hay fecha de lanzamiento ni servicio de notificaciones.";
+"mobile.notify_me" = "Guardar interés localmente";
 "mobile.submitting" = "Enviando...";
-"mobile.notified" = "¡Estás en la lista!";
-"mobile.notified_desc" = "Te avisaremos cuando la app móvil esté disponible.";
-"mobile.privacy_note" = "No se recopilan datos personales. Solo registra tu interés.";
+"mobile.notified" = "Interés guardado en este Mac";
+"mobile.notified_desc" = "Esta preferencia local no te suscribe a notificaciones.";
+"mobile.privacy_note" = "No se envía nada. Esta preferencia permanece en este Mac.";
 "mobile.error_title" = "Solicitud fallida";
 "mobile.error_message" = "No se pudo registrar tu interés. Verifica tu conexión a internet e intenta de nuevo.";
 
@@ -916,13 +916,13 @@
 "feedback.title_label" = "Rol";
 "feedback.contact_placeholder" = "Email";
 "feedback.message_placeholder" = "Cuéntanos lo que sea — opiniones, ideas, sugerencias...";
-"feedback.submit" = "Enviar";
+"feedback.submit" = "Abrir borrador en GitHub";
 "feedback.submitting" = "Enviando...";
 "feedback.remind_later" = "Recordar Después";
 "feedback.never_show" = "No Preguntar de Nuevo";
 "feedback.thanks" = "¡Gracias por tu opinión!";
-"feedback.error_title" = "Error al Enviar";
-"feedback.error_message" = "No se pudo enviar tu opinión. Inténtalo más tarde.";
+"feedback.error_title" = "No se pudo abrir el borrador";
+"feedback.error_message" = "Tu mensaje sigue aquí. Inténtalo de nuevo o abre tu fork manualmente en GitHub.";
 "feedback.role_developer" = "Desarrollador";
 "feedback.role_designer" = "Diseñador";
 "feedback.role_manager" = "Gerente";
@@ -1074,3 +1074,12 @@
 "support.popup_signature" = "el equipo unipersonal detrás de Claude Usage";
 "support.popup_body" = "Esta app es gratuita y de código abierto: sin anuncios, sin rastreo, sin muros de pago. Cada actualización se construye en mis tardes y fines de semana. Si Claude Usage te ha salvado alguna vez de quemar un límite de sesión, un café es lo que la mantiene viva y mejorando.";
 "support.popup_days" = "Vigilando tus límites desde hace %d días — siempre gratis";
+
+// Personal fork: reviewable feedback drafts and local mobile interest
+"mobile.clear_interest" = "Borrar interés local";
+"feedback.public_issue_notice" = "Esto abre un borrador en un repositorio público de GitHub. Revísalo antes de publicarlo. No incluyas credenciales ni datos personales.";
+"feedback.draft_opened" = "Continuar en el navegador";
+"feedback.draft_opened_desc" = "Revisa el borrador y publícalo tú mismo en GitHub. La app no ha publicado tus comentarios.";
+"feedback.edit_draft" = "Volver al mensaje";
+"feedback.draft_too_long" = "Este mensaje es demasiado largo para un borrador en el navegador. Acórtalo o abre un borrador vacío en GitHub y pega el mensaje manualmente. Tu texto permanece aquí.";
+"feedback.open_empty_draft" = "Abrir borrador vacío en GitHub";

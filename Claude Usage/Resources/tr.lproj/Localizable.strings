@@ -896,16 +896,16 @@
 /* MARK: - Mobile App (Coming Soon) */
 /* ==================== */
 "section.mobile_app_title" = "Mobil Uygulama";
-"section.mobile_app_desc" = "Mobil uygulama yakında";
+"section.mobile_app_desc" = "Mobil uygulamaya ilgi";
 "mobile.title" = "Mobil Uygulama";
-"mobile.subtitle" = "Claude kullanımınızı hareket halindeyken takip edin";
-"mobile.coming_soon_badge" = "YAKINDA";
-"mobile.cta_message" = "İlgileniyor musunuz? Bize bildirin, hazır olduğunda size haber verelim.";
-"mobile.notify_me" = "Beni Haberdar Et";
+"mobile.subtitle" = "Kullanımınız için olası bir mobil uygulama";
+"mobile.coming_soon_badge" = "DEĞERLENDİRİLİYOR";
+"mobile.cta_message" = "İlginizi bu Mac’e kaydedin. Yayın tarihi veya bildirim hizmeti bulunmuyor.";
+"mobile.notify_me" = "İlgiyi yerel olarak kaydet";
 "mobile.submitting" = "Gönderiliyor...";
-"mobile.notified" = "Listedesiniz!";
-"mobile.notified_desc" = "Mobil uygulama hazır olduğunda size haber vereceğiz.";
-"mobile.privacy_note" = "Kişisel veri toplanmaz. Bu yalnızca ilginizi kaydeder.";
+"mobile.notified" = "İlgi bu Mac’e kaydedildi";
+"mobile.notified_desc" = "Bu yerel tercih sizi bildirimlere kaydetmez.";
+"mobile.privacy_note" = "Hiçbir şey gönderilmez. Bu tercih bu Mac’te kalır.";
 "mobile.error_title" = "İstek Başarısız";
 "mobile.error_message" = "İlginiz kaydedilemedi. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.";
 
@@ -939,13 +939,13 @@
 "feedback.title_label" = "Rol";
 "feedback.contact_placeholder" = "E-posta";
 "feedback.message_placeholder" = "Bize her şeyi söyleyin — geri bildirim, fikirler, özellik istekleri...";
-"feedback.submit" = "Gönder";
+"feedback.submit" = "GitHub taslağını aç";
 "feedback.submitting" = "Gönderiliyor...";
 "feedback.remind_later" = "Daha Sonra Hatırlat";
 "feedback.never_show" = "Bir Daha Sorma";
 "feedback.thanks" = "Geri bildiriminiz için teşekkürler!";
-"feedback.error_title" = "Gönderim Başarısız";
-"feedback.error_message" = "Geri bildiriminiz gönderilemedi. Lütfen daha sonra tekrar deneyin.";
+"feedback.error_title" = "Taslak açılamadı";
+"feedback.error_message" = "Mesajınız hâlâ burada. Tekrar deneyin veya GitHub’da kendi fork’unuzu elle açın.";
 "feedback.role_developer" = "Geliştirici";
 "feedback.role_designer" = "Tasarımcı";
 "feedback.role_manager" = "Yönetici";
@@ -1085,3 +1085,12 @@
 "support.popup_signature" = "Claude Usage'ın arkasındaki tek kişilik ekip";
 "support.popup_body" = "Ücretsiz, açık kaynak, tek kişi tarafından yapıldı — reklam yok, izleme yok. Sizi bir oturum limitini yakmaktan kurtardıysa, bir kahve onu ayakta tutar.";
 "support.popup_days" = "%d gündür limitlerinizi izliyor — her zaman ücretsiz";
+
+// Personal fork: reviewable feedback drafts and local mobile interest
+"mobile.clear_interest" = "Yerel ilgiyi temizle";
+"feedback.public_issue_notice" = "Herkese açık bir GitHub deposunda taslak açılır. Yayınlamadan önce inceleyin. Kimlik bilgileri veya kişisel bilgiler eklemeyin.";
+"feedback.draft_opened" = "Tarayıcıda devam et";
+"feedback.draft_opened_desc" = "Taslağı inceleyip GitHub’da kendiniz yayınlayın. Uygulama geri bildiriminizi yayınlamadı.";
+"feedback.edit_draft" = "Mesaja dön";
+"feedback.draft_too_long" = "Bu mesaj tarayıcı taslağı için çok uzun. Kısaltın veya GitHub’da boş bir taslak açıp mesajı kendiniz yapıştırın. Metniniz burada kalır.";
+"feedback.open_empty_draft" = "Boş GitHub taslağı aç";

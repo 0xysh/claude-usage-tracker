@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
   - name: Question or Discussion
-    url: https://github.com/hamed-elfayome/Claude-Usage-Tracker/discussions
-    about: For questions or general discussions, please use GitHub Discussions
+    url: https://github.com/0xysh/claude-usage-tracker/issues
+    about: For questions or general discussions, open an issue in this fork

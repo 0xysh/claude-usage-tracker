@@ -890,16 +890,16 @@
 /* MARK: - Mobile App (Coming Soon) */
 /* ==================== */
 "section.mobile_app_title" = "行動 App";
-"section.mobile_app_desc" = "行動 App 即將推出";
+"section.mobile_app_desc" = "對行動應用程式的關注";
 "mobile.title" = "行動 App";
-"mobile.subtitle" = "隨時隨地追蹤您的 Claude 使用情況";
-"mobile.coming_soon_badge" = "即將推出";
-"mobile.cta_message" = "感興趣嗎？告訴我們，準備好後我們會通知您。";
-"mobile.notify_me" = "通知我";
+"mobile.subtitle" = "可能推出的用量查看配套行動應用程式";
+"mobile.coming_soon_badge" = "考慮中";
+"mobile.cta_message" = "在這台Mac上儲存您的關注。暫無發佈日期或通知服務。";
+"mobile.notify_me" = "在本機儲存關注";
 "mobile.submitting" = "提交中...";
-"mobile.notified" = "您已在列表中！";
-"mobile.notified_desc" = "行動 App 可用時我們會通知您。";
-"mobile.privacy_note" = "不收集任何個人資料。這僅記錄您的興趣。";
+"mobile.notified" = "關注已儲存在這台Mac上";
+"mobile.notified_desc" = "此本機偏好不會讓您訂閱通知。";
+"mobile.privacy_note" = "不會傳送任何資料。此偏好僅儲存在這台Mac上。";
 "mobile.error_title" = "請求失敗";
 "mobile.error_message" = "無法註冊您的興趣。請檢查您的網路連線並重試。";
 
@@ -933,13 +933,13 @@
 "feedback.title_label" = "角色";
 "feedback.contact_placeholder" = "電子郵件";
 "feedback.message_placeholder" = "告訴我們任何事情 — 回饋、想法、功能建議...";
-"feedback.submit" = "提交";
+"feedback.submit" = "開啟GitHub草稿";
 "feedback.submitting" = "提交中...";
 "feedback.remind_later" = "稍後提醒";
 "feedback.never_show" = "不再詢問";
 "feedback.thanks" = "感謝您的回饋！";
-"feedback.error_title" = "提交失敗";
-"feedback.error_message" = "無法傳送您的回饋。請稍後重試。";
+"feedback.error_title" = "無法開啟草稿";
+"feedback.error_message" = "您的訊息仍保留在此。請重試，或在GitHub上手動開啟您的分支儲存庫。";
 "feedback.role_developer" = "開發者";
 "feedback.role_designer" = "設計師";
 "feedback.role_manager" = "經理";
@@ -1079,3 +1079,12 @@
 "support.popup_signature" = "Claude Usage 背後的一人團隊";
 "support.popup_body" = "免費、開源、一人開發——沒有廣告，沒有追蹤。如果它曾幫你避免燒掉工作階段額度，一杯咖啡就能讓它繼續前進。";
 "support.popup_days" = "已守護你的額度 %d 天 — 永遠免費";
+
+// Personal fork: reviewable feedback drafts and local mobile interest
+"mobile.clear_interest" = "清除本機關注";
+"feedback.public_issue_notice" = "這會在公開的GitHub儲存庫中開啟草稿。請在發佈前檢查，不要包含憑證或個人資訊。";
+"feedback.draft_opened" = "在瀏覽器中繼續";
+"feedback.draft_opened_desc" = "請在GitHub上檢查草稿並自行發佈。應用程式尚未發佈您的意見。";
+"feedback.edit_draft" = "返回訊息";
+"feedback.draft_too_long" = "此訊息過長，無法透過瀏覽器草稿連結開啟。請縮短訊息，或開啟空白GitHub草稿並手動貼上。文字仍保留在此。";
+"feedback.open_empty_draft" = "開啟空白GitHub草稿";
