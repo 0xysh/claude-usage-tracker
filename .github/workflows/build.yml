@@ -43,6 +43,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO
 
       - name: Run Tests
+        timeout-minutes: 5
         run: |
           xcodebuild test \
             -project "Claude Usage.xcodeproj" \

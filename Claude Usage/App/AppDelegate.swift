@@ -7,6 +7,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     private var setupWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        // Hosted unit tests need the app module, not its user lifecycle. The
+        // shared scheme sets this only for TestAction, before any login stores,
+        // preferences, timers, provider requests, or interactive UI are touched.
+        if ProcessInfo.processInfo.environment["CLAUDE_USAGE_UNIT_TEST_HOST"] == "1" {
+            return
+        }
+        #endif
+
         // Disable window restoration for menu bar app
         UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
 
@@ -235,6 +244,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        #if DEBUG
+        // No app services were started in the isolated unit-test host.
+        if ProcessInfo.processInfo.environment["CLAUDE_USAGE_UNIT_TEST_HOST"] == "1" {
+            return
+        }
+        #endif
+
         // Cleanup
         NotchHookServer.shared.stop()
         NotchHUDController.shared.stop()
