@@ -362,7 +362,15 @@ final class StatusBarUIManager {
             let menuBarIsDark = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
 
             // Get usage data for this profile
-            let usage = profile.claudeUsage ?? ClaudeUsage.empty
+            guard let usage = profile.claudeUsage else {
+                button.title = ""
+                button.image = NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: "No usage data")
+                button.toolTip = "\(profile.name) · No usage data received"
+                statusItem.length = Self.multiProfilePlaceholderLength
+                continue
+            }
+            button.title = ""
+            button.toolTip = profile.name
             let showRemaining = config.showRemainingPercentage
 
             // Calculate percentages
@@ -575,11 +583,25 @@ final class StatusBarUIManager {
     /// Updates all status bar buttons based on current usage data
     func updateAllButtons(
         usage: ClaudeUsage,
-        apiUsage: APIUsage?
+        apiUsage: APIUsage?,
+        usageAvailable: Bool = true
     ) {
         // Get config from active profile
         let profile = ProfileManager.shared.activeProfile
         let config = profile?.iconConfig ?? .default
+
+        if !usageAvailable, !config.enabledMetrics.isEmpty {
+            for (metric, item) in statusItems where metric != .api || apiUsage == nil {
+                item.button?.title = ""
+                item.button?.image = NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: "No usage data")
+                item.button?.toolTip = "No usage data received"
+                item.length = Self.multiProfilePlaceholderLength
+            }
+            if apiUsage != nil {
+                updateButton(for: .api, usage: usage, apiUsage: apiUsage)
+            }
+            return
+        }
 
         // Keep the render path aligned with ClaudeAPIService/MenuBarManager auth
         // fallback logic so users authenticated only via `claude login` don't

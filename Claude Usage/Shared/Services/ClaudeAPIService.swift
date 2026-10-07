@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 
 /// Service for fetching usage data directly from Claude's API
 class ClaudeAPIService: APIServiceProtocol {
@@ -697,7 +698,7 @@ class ClaudeAPIService: APIServiceProtocol {
 
     // MARK: - Response Parsing
 
-    private func parseUsageResponse(_ data: Data) throws -> ClaudeUsage {
+    func parseUsageResponse(_ data: Data) throws -> ClaudeUsage {
         // Parse Claude's actual API response structure
 
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -765,13 +766,12 @@ class ClaudeAPIService: APIServiceProtocol {
             // Extract Fable weekly usage (seven_day_fable)
             var fablePercentage = 0.0
             var fableResetTime: Date? = nil
-            if let sevenDayFable = json["seven_day_fable"] as? [String: Any] {
-                if let utilization = sevenDayFable["utilization"] {
-                    fablePercentage = parseUtilization(utilization)
-                }
-                if let resetsAt = sevenDayFable["resets_at"] as? String {
-                    fableResetTime = resetTimeFormatter.date(from: resetsAt)
-                }
+            var fableAvailable = false
+            if let sevenDayFable = json["seven_day_fable"] as? [String: Any],
+               let utilization = parseFableUtilization(sevenDayFable["utilization"]) {
+                fableAvailable = true
+                fablePercentage = utilization
+                fableResetTime = parseFableResetTime(sevenDayFable["resets_at"], formatter: resetTimeFormatter)
             }
 
             // Newer API responses null out the legacy seven_day_* per-model
@@ -784,10 +784,7 @@ class ClaudeAPIService: APIServiceProtocol {
                 for limit in limits {
                     guard limit["kind"] as? String == "weekly_scoped",
                           let scope = limit["scope"] as? [String: Any],
-                          let model = scope["model"] as? [String: Any],
-                          let percentValue = limit["percent"] else { continue }
-                    let percent = parseUtilization(percentValue)
-                    let resetTime = (limit["resets_at"] as? String).flatMap { resetTimeFormatter.date(from: $0) }
+                          let model = scope["model"] as? [String: Any] else { continue }
 
                     // Match on the stable model id when the API provides one;
                     // display_name is a rename-prone human label kept as fallback.
@@ -798,9 +795,17 @@ class ClaudeAPIService: APIServiceProtocol {
                     }
 
                     if matches("fable", "mythos") {
-                        fablePercentage = percent
-                        fableResetTime = resetTime ?? fableResetTime
-                    } else if matches("opus") {
+                        let percent = parseFableUtilization(limit["percent"])
+                        fableAvailable = percent != nil
+                        fablePercentage = percent ?? 0
+                        fableResetTime = percent == nil ? nil : parseFableResetTime(limit["resets_at"], formatter: resetTimeFormatter)
+                        continue
+                    }
+
+                    guard let percentValue = limit["percent"] else { continue }
+                    let percent = parseUtilization(percentValue)
+                    let resetTime = (limit["resets_at"] as? String).flatMap { resetTimeFormatter.date(from: $0) }
+                    if matches("opus") {
                         opusPercentage = percent
                     } else if matches("sonnet") {
                         sonnetPercentage = percent
@@ -822,7 +827,7 @@ class ClaudeAPIService: APIServiceProtocol {
             let opusTokens = Int(Double(weeklyLimit) * (opusPercentage / 100.0))
             let sonnetTokens = Int(Double(weeklyLimit) * (sonnetPercentage / 100.0))
             let designTokens = Int(Double(weeklyLimit) * (designPercentage / 100.0))
-            let fableTokens = Int(Double(weeklyLimit) * (fablePercentage / 100.0))
+            let fableTokens = Int(min(Double(weeklyLimit) * (fablePercentage / 100.0), Double(Int.max).nextDown))
 
             let usage = ClaudeUsage(
                 sessionTokensUsed: sessionTokens,
@@ -844,6 +849,7 @@ class ClaudeAPIService: APIServiceProtocol {
                 fableWeeklyTokensUsed: fableTokens,
                 fableWeeklyPercentage: fablePercentage,
                 fableWeeklyResetTime: fableResetTime,
+                fableUsageAvailable: fableAvailable,
                 costUsed: nil,
                 costLimit: nil,
                 costCurrency: nil,
@@ -972,6 +978,36 @@ class ClaudeAPIService: APIServiceProtocol {
         // Log warning if we couldn't parse
         LoggingService.shared.logWarning("Failed to parse utilization value: \(value) (type: \(type(of: value)))")
         return 0.0
+    }
+
+    /// Missing or malformed model data is different from a reported 0%.
+    /// JSON booleans bridge to NSNumber too, so reject them explicitly.
+    private func parseFableUtilization(_ value: Any?) -> Double? {
+        let percentage: Double
+        if let number = value as? NSNumber {
+            guard CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+            percentage = number.doubleValue
+        } else if let string = value as? String {
+            var cleaned = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            if cleaned.hasSuffix("%") {
+                cleaned.removeLast()
+                cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            guard !cleaned.contains("%"), let parsed = Double(cleaned) else { return nil }
+            percentage = parsed
+        } else {
+            return nil
+        }
+        guard percentage.isFinite, percentage >= 0 else { return nil }
+        return percentage
+    }
+
+    private func parseFableResetTime(_ value: Any?, formatter: ISO8601DateFormatter) -> Date? {
+        guard let value = value as? String else { return nil }
+        if let date = formatter.date(from: value) { return date }
+        let wholeSecondsFormatter = ISO8601DateFormatter()
+        wholeSecondsFormatter.formatOptions = [.withInternetDateTime]
+        return wholeSecondsFormatter.date(from: value)
     }
 
     // MARK: - Session Initialization

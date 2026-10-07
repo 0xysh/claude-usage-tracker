@@ -48,7 +48,9 @@ struct CodexAccountView: View {
 
     private func statusCard(for profile: Profile) -> some View {
         let usesManual = profile.codexCredentialsJSON != nil
-        let connected = usesManual || detectedCredentials != nil
+        let credentialsAvailable = usesManual || detectedCredentials != nil
+        let connected = usesManual || (profile.codexAccountID != nil
+            && profile.codexAccountID == detectedCredentials?.resolvedAccountId)
 
         return HStack(spacing: DesignTokens.Spacing.medium) {
             Circle()
@@ -88,7 +90,7 @@ struct CodexAccountView: View {
                     Text("codex.test_connection".localized)
                 }
             }
-            .disabled(isTesting || !connected)
+            .disabled(isTesting || !credentialsAvailable)
         }
         .padding(DesignTokens.Spacing.medium)
         .background(DesignTokens.Colors.cardBackground)
@@ -242,11 +244,16 @@ struct CodexAccountView: View {
         }
         var updated = profile
         updated.codexCredentialsJSON = json
+        // Switching credential sources requires a fresh file-account check.
+        // A prior shared-file binding must not silently transfer to a new login.
+        updated.codexAccountID = nil
         profileManager.updateProfile(updated)
+        testResult = nil
         if json == nil { manualJSON = "" }
     }
 
     private func testConnection(for profile: Profile) {
+        refreshDetection()
         isTesting = true
         testResult = nil
         Task {

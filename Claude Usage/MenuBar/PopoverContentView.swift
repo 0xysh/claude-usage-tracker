@@ -68,6 +68,7 @@ struct PopoverContentView: View {
     // the window-resize loop.
     @State private var appeared = false
     @StateObject private var profileManager = ProfileManager.shared
+    @AppStorage("popoverShowAllProfiles") private var showAllProfiles = false
 
     private func profileInitials(for name: String) -> String {
         let words = name.split(separator: " ")
@@ -80,17 +81,20 @@ struct PopoverContentView: View {
     }
 
     // Computed properties for multi-profile mode support
-    private var displayUsage: ClaudeUsage {
-        manager.clickedProfileUsage ?? manager.usage
+    private var displayProfile: Profile? {
+        manager.clickedProfileId.flatMap { id in
+            profileManager.profiles.first(where: { $0.id == id })
+        } ?? profileManager.activeProfile
+    }
+
+    private var displayUsage: ClaudeUsage? {
+        displayProfile?.claudeUsage
     }
 
     private var displayAPIUsage: APIUsage? {
         // When viewing a non-active profile, use only that profile's API data
         // to avoid leaking the active profile's console data
-        if manager.clickedProfileUsage != nil {
-            return manager.clickedProfileAPIUsage
-        }
-        return manager.apiUsage
+        displayProfile?.apiUsage
     }
 
     /// Provider of the profile being viewed (clicked profile in multi-profile
@@ -103,10 +107,24 @@ struct PopoverContentView: View {
     }
 
     var body: some View {
+        if showAllProfiles {
+            CombinedUsageView(
+                profiles: profileManager.profiles.filter(\.isSelectedForDisplay),
+                errors: manager.profileRefreshErrors,
+                isRefreshing: manager.isRefreshing,
+                onRefresh: onRefresh,
+                onPreferences: onPreferences
+            )
+            .background(VisualEffectBackground())
+        } else {
+            individualProfileContent
+        }
+    }
+
+    private var individualProfileContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
             SmartHeader(
-                usage: displayUsage,
                 status: manager.status,
                 isRefreshing: isRefreshing,
                 onRefresh: {
@@ -128,23 +146,15 @@ struct PopoverContentView: View {
             PopoverDivider()
 
             // Error / stale data banners
-            if manager.hasCredentialError {
+            if let error = displayProfile.flatMap({ manager.profileRefreshErrors[$0.id] }) {
                 StatusBannerView(
                     icon: "exclamationmark.triangle.fill",
-                    message: "popover.banner.credentials_expired".localized,
+                    message: error,
                     color: .orange
                 ) {
                     onPreferences()
                 }
-            } else if manager.consecutiveRefreshFailures >= 3 {
-                StatusBannerView(
-                    icon: "arrow.clockwise.circle.fill",
-                    message: String(format: "popover.banner.refresh_failed".localized, manager.consecutiveRefreshFailures),
-                    color: .yellow
-                ) {
-                    onRefresh()
-                }
-            } else if let lastRefresh = manager.lastSuccessfulRefreshTime,
+            } else if let lastRefresh = displayUsage?.lastUpdated,
                       Date().timeIntervalSince(lastRefresh) > 300 {
                 let minutesAgo = Int(Date().timeIntervalSince(lastRefresh) / 60)
                 StatusBannerView(
@@ -208,12 +218,24 @@ struct PopoverContentView: View {
             }
 
             // Usage
-            SmartUsageDashboard(usage: displayUsage, apiUsage: displayAPIUsage, provider: displayProvider)
+            if let usage = displayUsage {
+                SmartUsageDashboard(usage: usage, apiUsage: displayAPIUsage, provider: displayProvider)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("No usage data received", systemImage: "clock.badge.exclamationmark")
+                        .font(.system(size: 13, weight: .medium))
+                    Text(displayProfile.flatMap { manager.profileRefreshErrors[$0.id] }
+                         ?? "Connect this account in Settings, then refresh.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(16)
+            }
 
             // Contextual Insights
-            if showInsights {
+            if showInsights, let usage = displayUsage {
                 PopoverDivider()
-                ContextualInsights(usage: displayUsage)
+                ContextualInsights(usage: usage)
                     .transition(.opacity)
             }
 
@@ -247,6 +269,7 @@ struct ProfileSwitcherCompact: View {
     @StateObject private var profileManager = ProfileManager.shared
     @State private var isHovered = false
     let onManageProfiles: () -> Void
+    var viewedProfileName: String? = nil
 
     var body: some View {
         Menu {
@@ -304,7 +327,7 @@ struct ProfileSwitcherCompact: View {
                 }
             }
         } label: {
-            Text(profileManager.activeProfile?.name ?? "popover.no_profile".localized)
+            Text(viewedProfileName ?? profileManager.activeProfile?.name ?? "popover.no_profile".localized)
                 .font(.system(size: 13, weight: .bold))
                 .foregroundColor(.primary)
                 .lineLimit(1)
@@ -456,7 +479,6 @@ struct ProfileSwitcherBar: View {
 
 // MARK: - Smart Header Component
 struct SmartHeader: View {
-    let usage: ClaudeUsage
     let status: ClaudeStatus
     let isRefreshing: Bool
     let onRefresh: () -> Void
@@ -498,7 +520,7 @@ struct SmartHeader: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                ProfileSwitcherCompact(onManageProfiles: onManageProfiles)
+                ProfileSwitcherCompact(onManageProfiles: onManageProfiles, viewedProfileName: clickedProfile?.name)
 
                 // Status
                 Button(action: {
@@ -588,12 +610,14 @@ struct SmartUsageDashboard: View {
     let usage: ClaudeUsage
     let apiUsage: APIUsage?
     var provider: Provider = .anthropic
+    var showRemainingOverride: Bool? = nil
     @StateObject private var profileManager = ProfileManager.shared
     private var capabilities: ProviderCapabilities {
         provider.descriptor.capabilities
     }
 
     private var showRemainingPercentage: Bool {
+        if let showRemainingOverride { return showRemainingOverride }
         if profileManager.displayMode == .multi {
             return profileManager.multiProfileConfig.showRemainingPercentage
         }
@@ -669,7 +693,7 @@ struct SmartUsageDashboard: View {
                 timeDisplay: timeDisplay
             )
 
-            if usage.fableWeeklyTokensUsed > 0 {
+            if usage.hasFableUsage {
                 UsageRow(
                     title: "menubar.fable_usage".localized,
                     tag: "menubar.weekly".localized,

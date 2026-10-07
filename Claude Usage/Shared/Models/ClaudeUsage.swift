@@ -37,6 +37,13 @@ struct ClaudeUsage: Codable, Equatable {
     var fableWeeklyTokensUsed: Int
     var fableWeeklyPercentage: Double
     var fableWeeklyResetTime: Date?
+    /// Explicit for new responses; nil retains compatibility with older caches
+    /// that stored only Fable counts, percentages and an optional reset date.
+    var fableUsageAvailable: Bool? = nil
+
+    var hasFableUsage: Bool {
+        fableUsageAvailable ?? (fableWeeklyPercentage > 0 || fableWeeklyTokensUsed > 0 || fableWeeklyResetTime != nil)
+    }
 
     // Extra usage data
     var costUsed: Double?
@@ -139,6 +146,7 @@ extension ClaudeUsage {
         case sonnetWeeklyTokensUsed, sonnetWeeklyPercentage, sonnetWeeklyResetTime
         case designWeeklyTokensUsed, designWeeklyPercentage, designWeeklyResetTime
         case fableWeeklyTokensUsed, fableWeeklyPercentage, fableWeeklyResetTime
+        case fableUsageAvailable
         case costUsed, costLimit, costCurrency
         case overageBalance, overageBalanceCurrency
         case planType, creditsBalance, creditsUnlimited
@@ -167,6 +175,7 @@ extension ClaudeUsage {
             fableWeeklyTokensUsed: try c.decodeIfPresent(Int.self, forKey: .fableWeeklyTokensUsed) ?? 0,
             fableWeeklyPercentage: try c.decodeIfPresent(Double.self, forKey: .fableWeeklyPercentage) ?? 0,
             fableWeeklyResetTime: try c.decodeIfPresent(Date.self, forKey: .fableWeeklyResetTime),
+            fableUsageAvailable: try c.decodeIfPresent(Bool.self, forKey: .fableUsageAvailable),
             costUsed: try c.decodeIfPresent(Double.self, forKey: .costUsed),
             costLimit: try c.decodeIfPresent(Double.self, forKey: .costLimit),
             costCurrency: try c.decodeIfPresent(String.self, forKey: .costCurrency),

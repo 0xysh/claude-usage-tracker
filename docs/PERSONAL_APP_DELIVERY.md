@@ -66,3 +66,39 @@ diagnostics bundle, and the unsigned Release app in a fresh ignored
 `build/local-ci.*` directory. Hosted tests have a five-minute process timeout;
 build steps have twenty-minute timeouts. Failed runs retain available evidence.
 The gate performs no installation or normal app launch.
+
+## Combined usage view
+
+In Settings > Popover, enable **Show accounts together**. The accounts selected
+in Manage Profiles appear in one scrollable popup, with Claude in green and Codex
+in purple. The existing separate menu-bar icons remain available; either opens
+the same combined popup. Disable this preference to restore individual popups.
+
+Each card uses its own profile's readings and errors. Missing readings show
+Unavailable, failed refreshes or readings older than five minutes show Last known,
+and recent successful readings show Fresh. The used/remaining label follows the
+existing percentage preference. The popup's **Used % / Remaining %** switch changes all cards together and saves
+the existing multi-profile percentage preference. In multi-profile mode it also
+updates the menu-bar percentages. It changes presentation only. A reported Fable
+quota appears even at zero; missing or invalid Fable data is labelled No quota
+reported. Neither state invents
+a usage value. TwinQuota informed the visual layout only; polling endpoints and
+the counter-reading method remain this fork's existing implementation.
+
+File-backed Codex profiles bind to a nonsecret account identity only after a
+successful fetch while that profile is active. For an older unbound profile,
+select it and use **Test Connection** once. Later combined/background reads must
+match that identity. A changed Codex login requires reconnecting the intended
+account; this app never rewrites or rotates the shared Codex login file.
+
+Claude refreshes use the same profile-aware credential selector in individual
+and combined views. Expired or incomplete CLI credentials produce an explicit
+error while preserving the last reading. Reconnect and sync through Claude Code
+when prompted. Browser organization discovery uses only the requested profile's
+session, and an in-flight response cannot be saved into a newly active profile.
+
+The focused synthetic regressions cover zero/missing Fable quotas, account
+binding and mismatches, Claude source selection, browser organization isolation,
+and freshness/error states. Full local qualification runs with the lifecycle
+and preferences isolation described above. Embedded-browser login repair and
+TwinQuota's counter-reading or crash behavior are outside this change.
