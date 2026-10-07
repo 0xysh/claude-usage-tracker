@@ -51,6 +51,11 @@ final class SecureProfilePersistence<Profiles: Codable> {
         self.snapshotStorage = snapshotStorage
     }
 
+    // No custom cleanup needs an actor hop. Explicitly opt out only the
+    // destructor: Swift 6.2 crashes optimizing inferred isolated destructors
+    // of generic classes with reference storage (swiftlang/swift#85308).
+    nonisolated deinit {}
+
     func load() throws -> LoadedProfiles? {
         lock.lock()
         defer { lock.unlock() }
