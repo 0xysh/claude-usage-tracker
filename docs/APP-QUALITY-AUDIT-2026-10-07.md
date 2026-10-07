@@ -118,6 +118,25 @@ invalid usage 21 tests, manual Codex ownership/persistence 10 tests. These overl
 the full suite where the tests are hosted; their counts must not be added to the
 full-suite total as unique coverage.
 
+Final personal delivery was signed and installed from application source commit
+`2986c9c`. Strict nested signature verification passed for
+`com.0xysh.ClaudeUsage`, team `K739254VXU`, with hardened runtime and both
+arm64/x86_64 slices. The installed executable matches the packaged executable,
+and its exact executable was observed running from `/Applications/Claude Usage.app`.
+The archive SHA-256 is
+`0c0a9e758ebd5ce6cd617f41fad2eab322693300f0a523303183ac777abd09c3`.
+The local build receipt is retained under ignored `release/personal/`.
+
+An actual capture of the installed app on 2026-10-07 confirms one horizontal
+summary beside the separate TwinQuota item. Normal application reopen produced
+the app's 386 × 706-point popup (window 3148); both provider cards, the mode
+switch and recovery actions fit visibly. Screenshots are kept locally under
+`/private/tmp/claude-polish-audit/installed-unified-*.png`, not committed.
+The user's actual Codex weekly reading is saved 8%, marked with a clock; Claude
+and Fable remain unavailable. These are honest current display states, not
+evidence of a successful live connection. Synthetic Fable-zero rendering is
+verified separately and never substitutes TwinQuota's data.
+
 ## Remaining live gates
 
 Claude requires a valid signed-in Claude Code account and an explicit sync when
