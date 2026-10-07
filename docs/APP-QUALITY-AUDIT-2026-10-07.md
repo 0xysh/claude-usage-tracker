@@ -168,17 +168,38 @@ also passes its 8 synthetic tests, and passive polling passes its 5 controls.
 The follow-up hosted full suite at `build/local-ci.6ylKKw/TestResults.xcresult`
 reports **358 tests: 356 passed, 0 failed, 2 skipped**. The same two unsigned
 Keychain limitations and Xcode 27 beta non-parity apply. Debug and optimized
-universal arm64/x86_64 Release builds also pass. Installation is deferred
-while the user's browser wizard is pending so unsaved login state is preserved.
+universal arm64/x86_64 Release builds also pass. Installation was deferred
+while the user's browser wizard was pending to preserve unsaved login state.
+After the user saved the personal organization, their dashboard showed fresh
+Claude usage and Fable. Their subsequent Codex Test Connection also produced a
+fresh weekly reading. The corrected app from source commit `036f402` was then
+signed, installed and opened using the authoritative personal delivery script.
+The previous installation was preserved. Strict nested verification passed;
+the universal installed and packaged executable hashes match:
+`646ffb2e498df071c6dba05db375dd9290574c73f088072edc9feffd1e6b1d3a`.
+The final archive SHA-256 is
+`a00481f819f5f53b4b537cca508f4a4c0e66c9b1a3548605d32a1772a02ecdd8`.
+
+Normal reopen of `/Applications/Claude Usage.app` produced its 386 × 706-point
+dashboard (window 3223). The actual installed-window capture at
+`/private/tmp/claude-polish-audit/installed-cli-status-popup.png` shows both
+accounts **Fresh** after restart: Codex weekly 12%, Claude weekly 100%, Fable 0%
+and Claude Extra Usage 75%. The current Codex response has no session quota, so
+that row stays unavailable instead of inventing 0%. This verifies live usage
+display and preserved connections for these two configured accounts, including
+browser-backed Claude. It does not establish exhaustive signed-storage failure
+handling or long-duration heavy-load stability.
 
 ## Remaining live gates
 
-Claude requires a valid signed-in Claude Code account and an explicit sync when
-its credentials are missing/expired. Older file-backed Codex profiles require
-their own active-profile Test Connection to establish identity. The app now
+These two accounts now display fresh readings in the installed app. The
+browser-backed Claude connection works independently of the previously expired
+CLI login. Using the CLI route requires signing in again and explicitly syncing
+its credentials. Other older file-backed Codex profiles require their own
+active-profile Test Connection to establish identity. The app now
 provides direct recovery routes; it never guesses a login or shows missing usage
 as a full/empty allowance. Actual Fable availability is decided by the provider
-response, not the reference screenshot. Embedded-browser login acceptance,
+response, not the reference screenshot. Browser login succeeded for the user's
+personal organization; this does not prove acceptance for every login method.
 VoiceOver traversal, detached-window interaction, long heavy-load stability and
-public release/notarization must not be represented as verified by synthetic
-tests alone.
+public release/notarization remain unqualified by these checks.
