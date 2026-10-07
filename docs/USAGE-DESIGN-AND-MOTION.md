@@ -98,5 +98,26 @@ No asset is synthesized or recolored.
   pulse or prove cancellation midway. Geometry/static policy tests and source
   review cover those paths; system Reduce Motion was not changed for testing.
 
-Signed installation and actual live popup verification are recorded below once
-packaging completes.
+### Installed artifact
+
+The signed app from source commit `8b8c08716a4e431e4e65305baaa9171c92c4a559` is installed in
+`/Applications/Claude Usage.app`; its exact executable was observed running
+(PID 82167). Strict nested signature verification and x86_64/arm64 slices passed.
+Installed and packaged executable hashes match: `4c6bd63af2531861a76a637f2690080c5fa315be7aa997c42f970c69d43a9035`.
+ZIP SHA-256: `56d3689764841b6ebb20f76aa9101a88d46a6fca2a8f06186f8cc2c280ef6645`. Previous installation is preserved under
+`release/personal/backups/install-20261007-115102-clntY9`.
+
+Normal reopen after initialization shows both accounts **Fresh**. The actual
+visible popup has original logos, 7pt bars and inline **Credits: 62,498.61**;
+Codex weekly **12%** has no absent-session placeholder. Claude retains session
+**0%**, weekly **100%**, Fable **0%** and Extra Usage **75%**. Both cards and their
+controls fit together. Own-window capture is at
+`/private/tmp/claude-polish-audit/installed-motion-branding-popup.png`; its gray
+vibrancy fallback was cross-checked against the actual on-screen popup rectangle
+at `/private/tmp/claude-polish-audit/installed-motion-branding-on-screen.png`,
+which confirms the intended dark surfaces. No settings/credential screenshot
+was taken. The ignored `release/personal/BUILD-RECEIPT.md` records the artifact.
+
+Personal Apple Development signing is not public notarization. The existing
+PR remains a draft, unmerged; the branch is pushed with skip-CI commits.
+No new GitHub Actions runs were started.

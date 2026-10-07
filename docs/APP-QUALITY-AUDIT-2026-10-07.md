@@ -214,3 +214,10 @@ the earlier collapsed-account-metadata layout finding is superseded by this
 validated inline summary. Quota health colors remain distinct from provider
 identity. The new final local gate passes 376 of 378 tests, with only the same
 two unsigned Keychain skips, and optimized universal Release passes.
+
+The motion/branding app from `8b8c087` was subsequently signed, installed
+and observed running. Its installed executable matches the packaged bytes.
+The actual visible usage popup confirms both accounts Fresh, Codex's inline
+credit and omitted absent session, original logos, 7pt tracks and all Claude
+quotas/controls together. Artifact details are in the design follow-up document
+and ignored personal build receipt.
