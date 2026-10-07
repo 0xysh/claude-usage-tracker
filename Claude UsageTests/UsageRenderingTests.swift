@@ -102,6 +102,42 @@ final class UsageRenderingTests: XCTestCase {
         }
     }
 
+    func testUnifiedMenuBarRendersAllProvidersAndFableInOneLine() throws {
+        var usage = ClaudeUsage.empty
+        usage.weeklyPercentage = 78
+        usage.fableUsageAvailable = true
+        usage.fableWeeklyPercentage = 0
+        var codexUsage = usage
+        codexUsage.weeklyPercentage = 8
+        codexUsage.fableUsageAvailable = false
+        let selected = [Profile(name: "Codex Pro", provider: .codex, claudeUsage: codexUsage),
+                        Profile(name: "Claude Max", claudeUsage: usage)]
+        let renderer = MenuBarIconRenderer()
+        for dark in [false, true] {
+            for state in ["fresh", "saved", "missing"] {
+                var profiles = selected
+                if state == "saved" {
+                    for index in profiles.indices { profiles[index].claudeUsage?.lastUpdated = .distantPast }
+                } else if state == "missing" {
+                    for index in profiles.indices { profiles[index].claudeUsage = nil }
+                }
+                let model = CombinedMenuBarPresentation(profiles: profiles, config: .default, errors: [:])
+                let image = renderer.createCombinedProfileSummary(profiles: profiles, config: .default,
+                                                                  errors: [:], isDarkMode: dark)
+                XCTAssertEqual(image.size.width, model.reservedWidth)
+                XCTAssertLessThanOrEqual(image.size.width, 480)
+                XCTAssertEqual(image.size.height, 22)
+                let canvas = NSImage(size: NSSize(width: image.size.width + 16, height: 38))
+                canvas.lockFocus()
+                (dark ? NSColor(white: 0.10, alpha: 1) : NSColor(white: 0.95, alpha: 1)).setFill()
+                NSRect(origin: .zero, size: canvas.size).fill()
+                image.draw(at: NSPoint(x: 8, y: 8), from: .zero, operation: .sourceOver, fraction: 1)
+                canvas.unlockFocus()
+                try retain(canvas, name: "unified-\(dark ? "dark" : "light")-\(state)")
+            }
+        }
+    }
+
     private func retain(_ image: NSImage, name: String) throws {
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let data = try XCTUnwrap(image.tiffRepresentation)

@@ -71,8 +71,13 @@ The gate performs no installation or normal app launch.
 
 In Settings > Popover, enable **Show accounts together**. The accounts selected
 in Manage Profiles appear in one scrollable popup, with Claude in green and Codex
-in purple. The existing separate menu-bar icons remain available; either opens
-the same combined popup. Disable this preference to restore individual popups.
+in purple. This also creates one horizontal menu-bar summary for all selected
+accounts, with provider labels, weekly `7d` percentages, Fable and saved-reading
+clocks. The existing Show week option selects weekly usage; turning it off shows
+the `5h` session instead while Fable remains explicitly weekly. The used/remaining
+preference applies to the summary. Missing quota values show an em dash, never
+an invented 0%. Separate icon styles apply when combined view is off. Disable
+this preference to restore the separate icons and individual popups.
 The existing Keyboard Shortcuts settings can assign Toggle Popover. The personal
 installation uses Control + Option + Command + U; macOS registration was verified.
 Opening the installed app again from Applications also reveals the dashboard.
@@ -102,8 +107,11 @@ session, and an in-flight response cannot be saved into a newly active profile.
 Each card can refresh its own account or open that account's credential settings.
 Saved readings use a clock and neutral menu-bar styling; missing readings retain
 their profile label. The tooltip names session/week percentages and used/remaining
-mode. The percentage mode also applies to single-profile icons while the combined
-view is enabled. Detached combined content uses the combined window width.
+mode. The combined summary takes precedence over both single- and multi-profile
+display modes and retains its native item across usage/percentage changes.
+Detached combined content uses the combined window width. Reopening or using the
+shortcut anchors to an actual available item even if the active account is
+deselected in Manage Profiles.
 Primary Session/Weekly/Fable rows use a compact layout so both provider sections
 fit the normal popup; connection help and provider plan/credits are expandable.
 Additional accounts or expanded details remain scrollable. The individual view

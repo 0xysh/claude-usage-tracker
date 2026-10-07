@@ -120,6 +120,10 @@ class MenuBarManager: NSObject, ObservableObject {
     private var updateDebounceTimer: Timer?
     private var cachedIsDarkMode: Bool = false
 
+    private var usesCombinedMenuBar: Bool {
+        SharedDataStore.shared.loadPopoverShowAllProfiles()
+    }
+
     func setup() {
         // Initialize cached appearance to avoid layout recursion
         cachedIsDarkMode = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -131,8 +135,10 @@ class MenuBarManager: NSObject, ObservableObject {
         statusBarUIManager = StatusBarUIManager()
         statusBarUIManager?.delegate = self
 
-        // Check if we should use multi-profile mode
-        if profileManager.displayMode == .multi {
+        // The combined summary takes precedence over single/multi profile mode.
+        if usesCombinedMenuBar {
+            updateCombinedProfileDisplay()
+        } else if profileManager.displayMode == .multi {
             // Multi-profile mode - setup with selected profiles
             setupMultiProfileMode()
         } else {
@@ -192,7 +198,7 @@ class MenuBarManager: NSObject, ObservableObject {
             guard let self = self else { return }
 
             // Skip only if no credentials exist anywhere (profile or system keychain)
-            guard self.hasAnyAvailableCredentials() else {
+            guard self.usesCombinedMenuBar || self.hasAnyAvailableCredentials() else {
                 LoggingService.shared.log("Skipping network-available refresh (no credentials available)")
                 return
             }
@@ -208,7 +214,7 @@ class MenuBarManager: NSObject, ObservableObject {
 
         // Initial data fetch (with small delay for launch-at-login scenarios).
         // Includes system Keychain CLI credentials as a fallback.
-        if hasAnyAvailableCredentials() {
+        if usesCombinedMenuBar || hasAnyAvailableCredentials() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                 self?.refreshUsage()
             }
@@ -362,6 +368,22 @@ class MenuBarManager: NSObject, ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Selection, names, and cached readings can change without switching the
+        // active account. Retain the combined item's identity while repainting.
+        profileManager.$profiles
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                if self.usesCombinedMenuBar {
+                    self.updateAllStatusBarIcons()
+                } else if self.profileManager.displayMode == .multi {
+                    self.updateMultiProfileDisplay()
+                }
+            }
+            .store(in: &cancellables)
+
         LoggingService.shared.log("MenuBarManager: Observing profile changes (initial: \(initialProfileId?.uuidString ?? "nil"))")
     }
 
@@ -388,7 +410,7 @@ class MenuBarManager: NSObject, ObservableObject {
 
         // 3. Update menu bar based on current display mode
         // IMPORTANT: In multi-profile mode, we update all icons, not just switch config
-        if profileManager.displayMode == .multi {
+        if usesCombinedMenuBar || profileManager.displayMode == .multi {
             // Multi-profile mode - update icons without recreating status items
             updateMultiProfileDisplay()
         } else {
@@ -401,7 +423,7 @@ class MenuBarManager: NSObject, ObservableObject {
 
         // 5. Trigger immediate refresh if any credentials are available, including
         // system Keychain CLI fallback used by ClaudeAPIService.
-        if hasAnyAvailableCredentials() {
+        if usesCombinedMenuBar || hasAnyAvailableCredentials() {
             self.lastRefreshTriggerTime = Date()
             refreshUsage()
         } else {
@@ -436,6 +458,14 @@ class MenuBarManager: NSObject, ObservableObject {
     }
 
     private func updateMenuBarDisplay(with config: MenuBarIconConfiguration) {
+        if usesCombinedMenuBar {
+            updateCombinedProfileDisplay()
+            return
+        }
+        if statusBarUIManager?.isInCombinedProfileMode == true {
+            handleDisplayModeChange()
+            return
+        }
         // Skip if in multi-profile mode - this method is for single profile mode only
         guard profileManager.displayMode == .single else {
             LoggingService.shared.log("MenuBarManager: Skipping updateMenuBarDisplay (in multi-profile mode)")
@@ -711,6 +741,14 @@ class MenuBarManager: NSObject, ObservableObject {
 
     /// Updates all enabled status bar icons
     private func updateAllStatusBarIcons() {
+        if usesCombinedMenuBar {
+            updateCombinedProfileDisplay()
+            return
+        }
+        if statusBarUIManager?.isInCombinedProfileMode == true {
+            handleDisplayModeChange()
+            return
+        }
         // Check if in multi-profile mode
         if profileManager.displayMode == .multi {
             // Update multi-profile icons using profiles from profileManager
@@ -734,6 +772,10 @@ class MenuBarManager: NSObject, ObservableObject {
 
     /// Updates a specific metric's status bar icon
     private func updateStatusBarIcon(for metricType: MenuBarMetricType) {
+        if usesCombinedMenuBar {
+            updateAllStatusBarIcons()
+            return
+        }
         statusBarUIManager?.updateButton(
             for: metricType,
             usage: usage,
@@ -827,6 +869,12 @@ class MenuBarManager: NSObject, ObservableObject {
             Task { @MainActor in
                 // Check if active profile has any credentials, including system
                 // Keychain CLI fallback.
+                if self.usesCombinedMenuBar {
+                    self.updateCombinedProfileDisplay()
+                    self.lastRefreshTriggerTime = Date()
+                    self.refreshUsage()
+                    return
+                }
                 guard let profile = self.profileManager.activeProfile, self.hasAnyAvailableCredentials() else {
                     LoggingService.shared.logInfo("Credentials changed but no usage credentials - showing default logo")
 
@@ -862,7 +910,7 @@ class MenuBarManager: NSObject, ObservableObject {
             // Reload configuration from active profile (already on main queue)
             Task { @MainActor in
                 // Handle differently based on display mode
-                if self.profileManager.displayMode == .multi {
+                if self.usesCombinedMenuBar || self.profileManager.displayMode == .multi {
                     // Multi-profile mode - update icons without recreating status items
                     self.updateMultiProfileDisplay()
                 } else {
@@ -900,10 +948,14 @@ class MenuBarManager: NSObject, ObservableObject {
             guard let self = self else { return }
 
             Task { @MainActor in
+                let wasCombined = self.statusBarUIManager?.isInCombinedProfileMode == true
                 if self.profileManager.displayMode == .multi {
                     self.updateMultiProfileDisplay()
                 } else {
                     self.updateAllStatusBarIcons()
+                }
+                if self.usesCombinedMenuBar && !wasCombined {
+                    self.refreshUsage()
                 }
             }
         }
@@ -913,6 +965,12 @@ class MenuBarManager: NSObject, ObservableObject {
         let displayMode = profileManager.displayMode
 
         LoggingService.shared.log("MenuBarManager: Display mode changed to \(displayMode.rawValue)")
+
+        if usesCombinedMenuBar {
+            updateCombinedProfileDisplay()
+            return
+        }
+        prepareForStatusBarRebuild()
 
         if displayMode == .multi {
             // Switch to multi-profile mode
@@ -947,7 +1005,16 @@ class MenuBarManager: NSObject, ObservableObject {
 
         if !uiManager.hasValidStatusBar {
             LoggingService.shared.log("MenuBarManager: Headless mode - display connected, retrying status bar setup (screens: \(NSScreen.screens.count))")
-            setup()
+            if usesCombinedMenuBar {
+                // Retry only the native item; observers and refresh services
+                // were already initialized during headless startup.
+                uiManager.setupCombinedProfileSummary(
+                    profiles: profileManager.profiles, config: profileManager.multiProfileConfig,
+                    errors: profileRefreshErrors, target: self, action: #selector(togglePopover))
+                DispatchQueue.main.async { [weak self] in self?.updateAllStatusBarIcons() }
+            } else {
+                setup()
+            }
         }
     }
 
@@ -965,6 +1032,10 @@ class MenuBarManager: NSObject, ObservableObject {
     }
 
     private func setupMultiProfileMode() {
+        if usesCombinedMenuBar {
+            updateCombinedProfileDisplay()
+            return
+        }
         let selectedProfiles = profileManager.getSelectedProfiles()
         let config = profileManager.multiProfileConfig
 
@@ -989,6 +1060,14 @@ class MenuBarManager: NSObject, ObservableObject {
     /// Incrementally updates multi-profile status items (without destroying/recreating them)
     /// Use this when only icon config changed but the set of profiles may or may not have changed.
     private func updateMultiProfileDisplay() {
+        if usesCombinedMenuBar {
+            updateCombinedProfileDisplay()
+            return
+        }
+        if statusBarUIManager?.isInCombinedProfileMode == true {
+            handleDisplayModeChange()
+            return
+        }
         let selectedProfiles = profileManager.getSelectedProfiles()
         let config = profileManager.multiProfileConfig
 
@@ -1007,6 +1086,35 @@ class MenuBarManager: NSObject, ObservableObject {
         }
 
         LoggingService.shared.log("MenuBarManager: Multi-profile display updated incrementally with \(selectedProfiles.count) profiles")
+    }
+
+    private func prepareForStatusBarRebuild() {
+        closePopoverOrWindow()
+        currentPopoverButton = nil
+        lastPopoverCloseButton = nil
+        lastPopoverCloseDate = .distantPast
+        clickedProfileId = nil
+        clickedProfileUsage = nil
+        clickedProfileAPIUsage = nil
+    }
+
+    private func updateCombinedProfileDisplay() {
+        guard let uiManager = statusBarUIManager else { return }
+        if uiManager.isInCombinedProfileMode {
+            uiManager.updateCombinedProfileSummary(
+                profiles: profileManager.profiles, config: profileManager.multiProfileConfig,
+                errors: profileRefreshErrors)
+        } else {
+            prepareForStatusBarRebuild()
+            uiManager.setupCombinedProfileSummary(
+                profiles: profileManager.profiles, config: profileManager.multiProfileConfig,
+                errors: profileRefreshErrors, target: self, action: #selector(togglePopover))
+            // Let the fixed native item finish layout before assigning its image.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.usesCombinedMenuBar else { return }
+                self.updateAllStatusBarIcons()
+            }
+        }
     }
 
     /// Refreshes usage data for all profiles selected for multi-profile display
@@ -1151,10 +1259,8 @@ class MenuBarManager: NSObject, ObservableObject {
     }
 
     private func setupSingleProfileMode() {
-        guard let profile = profileManager.activeProfile else { return }
-
         let hasUsageCredentials = hasAnyAvailableCredentials()
-        let config = profile.iconConfig
+        let config = profileManager.activeProfile?.iconConfig ?? .default
 
         // If no usage credentials, create empty config to show default logo
         let displayConfig: MenuBarIconConfiguration

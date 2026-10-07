@@ -20,10 +20,10 @@ struct PopoverSettingsView: View {
                     subtitle: "popover.subtitle".localized
                 )
 
-                SettingsSectionCard(title: "Combined view", subtitle: "Claude and Codex in one window") {
+                SettingsSectionCard(title: "Combined view", subtitle: "Claude and Codex in one menu-bar item and one window") {
                     SettingToggle(
                         title: "Show accounts together",
-                        description: "Show all selected profiles in the same window. Choose profiles in Manage Profiles.",
+                        description: "Show selected profiles in one menu-bar item and one window. Choose profiles in Manage Profiles.",
                         isOn: $showAllProfiles
                     )
                 }
@@ -52,6 +52,7 @@ struct PopoverSettingsView: View {
         }
         .onChange(of: showAllProfiles) { _, newValue in
             SharedDataStore.shared.savePopoverShowAllProfiles(newValue)
+            NotificationCenter.default.post(name: .multiProfileConfigChanged, object: nil)
         }
         .onChange(of: timeDisplay) { _, newValue in
             SharedDataStore.shared.savePopoverTimeDisplay(newValue)

@@ -7,6 +7,10 @@ Keep this fork's provider-reading method, shared Codex auth-file ownership,
 local reporting, owned feedback/update destinations, and upstream attribution.
 The supplied menu-bar screenshot is the starting defect evidence. TwinQuota
 remains a visual reference only.
+The user's follow-up screenshot additionally requires one native menu-bar item
+for all selected providers, with a readable horizontal summary inspired by
+TwinQuota. This extends the delivery gate to native item lifecycle/identity,
+weekly/Fable rendering, and separate-mode restoration.
 
 Required gates: reproduce and fix verified account/data defects, inspect actual
 SwiftUI renders with synthetic edge cases, pass focused regressions and the full
@@ -32,6 +36,8 @@ run is needed. Stop after those gates; this is not an unbounded feature rewrite.
 | P2 | Percentage switch in a combined popup did not update single-profile icons consistently | Apply the same app-wide combined preference and avoid calling multi-mode configuration from single-mode notifications | Source flow inspection and full local qualification |
 | P2 | Detached combined content used an individual window's 280-point width | Size the detached window for the combined view | Source sizing inspection; live detachment remains a manual gate |
 | P2 | The installed popup's expanded recovery copy and secondary account data pushed the other provider below the useful overview | Compact primary rows; keep Fable visible; collapse connection help and plan/credits into details | Actual installed screenshot exposed the defect; two-provider render height falls from 851 to 527 points, with 120 reserved for header/mode picker |
+| P2 | Shared popup still created two separate provider menu items | One owned native item with stable autosave/width and readable provider/period/percentage segments, including Fable | Native lifecycle regression verifies 1 item for 2 accounts, same button/width after refresh and percentage toggle, 2 items after separate-mode restoration and 0 after cleanup |
+| P2 | Keyboard/reopen fallback returned nil when the active profile had no selected item or the default logo was used | Prefer the combined item, then actual configured/default/ordered selected-profile buttons | Actual reopen capture attempt exposed the missing window; native regression verifies a fallback for a deselected profile |
 | P2 | Test-host network logging could load/write the real app's diagnostic file | Test lifecycle keeps this logger in memory and never loads or saves the production file | Source guard in addition to isolated preferences |
 | P3 | Small labels, unlabeled icon/traffic-light controls, missing Reduce Motion support | Larger readings/copy, named controls, native button semantics and motion preference | Source and light/dark render inspection |
 | P3 | Status-item cache could outlive removed buttons or ignore template/dimension changes | Clear lifecycle cache/timer; include image dimensions and template mode in its identity | Source inspection |
@@ -89,12 +95,22 @@ data. Only the combined layout is condensed; individual dashboards retain their
 full subtitle and plan/credit display. Screen-reader descriptions retain period,
 reset and missing-reading context.
 
-Final local qualification passed at `build/local-ci.66tjsM`: **330 tests,
-328 passed, 0 failed, 2 skipped**. The two skipped unsigned Keychain round trips
+The unified-bar extension adds six presentation tests, two native lifecycle
+tests and one actual-render test. All 12 focused model/lifecycle/render tests
+pass. The first focused build caught an ambiguous numeric literal in a new test
+fixture; explicitly using `Double.infinity` resolved that test-only compiler
+error. Synthetic images cover fresh/saved/missing readings in both appearances.
+Summary widths reserve the numeric value and clock so missing → 0% → 100% and
+Used → Remaining changes do not recreate or resize the native item. Multiple
+accounts from the same provider get ordinal labels and full tooltip names.
+Provider polling and authentication endpoints are unchanged by this extension.
+
+Final local qualification passed at `build/local-ci.SS3J7Y`: **339 tests,
+337 passed, 0 failed, 2 skipped**. The two skipped unsigned Keychain round trips
 are not counted as verified signed-app storage behavior. Debug and optimized
 universal arm64/x86_64 Release builds passed. Xcode 27.0 beta (27A5228h) is
 explicitly non-parity with CI's Xcode 26.0.1. Result bundle:
-`build/local-ci.66tjsM/TestResults.xcresult`.
+`build/local-ci.SS3J7Y/TestResults.xcresult`.
 
 All five focused command checks also passed on the integrated source: activation
 5 tests, Claude identity 8 tests, passive polling 5 controls, Codex binding and

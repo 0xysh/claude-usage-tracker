@@ -8,14 +8,15 @@
 import Cocoa
 import Combine
 
-/// Manages multiple menu bar status items for different metrics
+/// Owns the combined summary or the separate profile/metric menu bar items.
 final class StatusBarUIManager {
     // Dictionary to hold multiple status items keyed by metric type (single profile mode)
     private var statusItems: [MenuBarMetricType: NSStatusItem] = [:]
 
     // Dictionary to hold status items keyed by profile ID (multi-profile mode)
     private var multiProfileStatusItems: [UUID: NSStatusItem] = [:]
-
+    private var multiProfileOrder: [UUID] = []
+    private var combinedStatusItem: NSStatusItem?
 
     // Current display mode
     private var isMultiProfileMode: Bool = false
@@ -48,6 +49,7 @@ final class StatusBarUIManager {
     }
     /// Returns a stable autosaveName for the default logo (no credentials)
     private static let defaultLogoAutosaveName: NSStatusItem.AutosaveName = "\(autosavePrefix).defaultLogo"
+    private static let combinedAutosaveName: NSStatusItem.AutosaveName = "\(autosavePrefix).combinedSummary"
 
     /// Fixed placeholder length for freshly-created multi-profile status items. Creating
     /// them at a concrete length (rather than .variableLength) avoids the macOS 26 (Tahoe)
@@ -119,6 +121,10 @@ final class StatusBarUIManager {
 
     /// Updates status bar items based on new configuration (incremental approach)
     func updateConfiguration(target: AnyObject, action: Selector, config: MenuBarIconConfiguration) {
+        guard !isMultiProfileMode, combinedStatusItem == nil else {
+            setup(target: target, action: action, config: config)
+            return
+        }
         // Determine what the new set of items should be
         let newMetricTypes: Set<MenuBarMetricType>
         if config.enabledMetrics.isEmpty {
@@ -135,6 +141,7 @@ final class StatusBarUIManager {
         for metricType in itemsToRemove {
             if let statusItem = statusItems[metricType] {
                 if let button = statusItem.button {
+                    lastImageData.removeValue(forKey: ObjectIdentifier(button))
                     button.image = nil
                     button.action = nil
                     button.target = nil
@@ -206,6 +213,17 @@ final class StatusBarUIManager {
             NSStatusBar.system.removeStatusItem(statusItem)
         }
         multiProfileStatusItems.removeAll()
+        multiProfileOrder.removeAll()
+
+        if let statusItem = combinedStatusItem {
+            if let button = statusItem.button {
+                button.image = nil
+                button.action = nil
+                button.target = nil
+            }
+            NSStatusBar.system.removeStatusItem(statusItem)
+        }
+        combinedStatusItem = nil
 
         isMultiProfileMode = false
 
@@ -213,6 +231,54 @@ final class StatusBarUIManager {
     }
 
     // MARK: - Multi-Profile Mode
+
+    /// Creates one fixed-width summary item. Usage updates retain its identity.
+    func setupCombinedProfileSummary(profiles: [Profile], config: MultiProfileDisplayConfig,
+                                     errors: [UUID: String], target: AnyObject, action: Selector) {
+        cleanup()
+        let presentation = CombinedMenuBarPresentation(profiles: profiles, config: config, errors: errors)
+        let item = NSStatusBar.system.statusItem(withLength: CGFloat(presentation.reservedWidth))
+        item.autosaveName = Self.combinedAutosaveName
+        item.isVisible = true
+        if let button = item.button {
+            button.title = ""
+            button.action = action
+            button.target = target
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            button.toolTip = presentation.tooltip
+            button.setAccessibilityLabel(presentation.tooltip)
+        } else {
+            LoggingService.shared.logWarning("Combined status bar button is nil - screens: \(NSScreen.screens.count)")
+        }
+        combinedStatusItem = item
+        observeAppearanceChanges()
+        LoggingService.shared.logUIEvent("Combined menu bar initialized with one status item")
+    }
+
+    /// Refreshes the existing item without a variable-width AppKit layout solve.
+    func updateCombinedProfileSummary(profiles: [Profile], config: MultiProfileDisplayConfig,
+                                      errors: [UUID: String]) {
+        guard let item = combinedStatusItem, let button = item.button else { return }
+        let presentation = CombinedMenuBarPresentation(profiles: profiles, config: config, errors: errors)
+        let isDarkMode = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let image = renderer.createCombinedProfileSummary(profiles: profiles, config: config,
+                                                         errors: errors, isDarkMode: isDarkMode)
+        // The presentation reserves the same width for used/remaining, saved,
+        // missing, and reported-zero values; only selection/layout changes resize.
+        let width = CGFloat(presentation.reservedWidth)
+        if abs(item.length - width) > 0.5 { item.length = width }
+        button.title = ""
+        button.toolTip = presentation.tooltip
+        button.setAccessibilityLabel(presentation.tooltip)
+        setButtonImage(button, image: image)
+    }
+
+    var isInCombinedProfileMode: Bool { combinedStatusItem != nil }
+
+    /// The actual owned items, used to verify layout transitions and cleanup.
+    var statusItemCount: Int {
+        statusItems.count + multiProfileStatusItems.count + (combinedStatusItem == nil ? 0 : 1)
+    }
 
     /// Sets up status bar for multi-profile display mode
     func setupMultiProfile(profiles: [Profile], target: AnyObject, action: Selector) {
@@ -223,6 +289,8 @@ final class StatusBarUIManager {
 
         // Filter to only profiles selected for display
         let selectedProfiles = profiles.filter { $0.isSelectedForDisplay }
+        multiProfileOrder = selectedProfiles.isEmpty
+            ? [Self.defaultLogoPlaceholderUUID] : selectedProfiles.map(\.id)
 
         if selectedProfiles.isEmpty {
             // No profiles selected - show default logo
@@ -281,6 +349,8 @@ final class StatusBarUIManager {
         }
 
         let selectedProfiles = profiles.filter { $0.isSelectedForDisplay }
+        multiProfileOrder = selectedProfiles.isEmpty
+            ? [Self.defaultLogoPlaceholderUUID] : selectedProfiles.map(\.id)
         let newProfileIds: Set<UUID> = selectedProfiles.isEmpty
             ? [Self.defaultLogoPlaceholderUUID]
             : Set(selectedProfiles.map { $0.id })
@@ -291,6 +361,7 @@ final class StatusBarUIManager {
         for profileId in idsToRemove {
             if let statusItem = multiProfileStatusItems[profileId] {
                 if let button = statusItem.button {
+                    lastImageData.removeValue(forKey: ObjectIdentifier(button))
                     button.image = nil
                     button.action = nil
                     button.target = nil
@@ -566,6 +637,7 @@ final class StatusBarUIManager {
 
     /// Checks if status bar has at least one valid button (for headless mode detection)
     var hasValidStatusBar: Bool {
+        if combinedStatusItem?.button != nil { return true }
         // Check single-profile status items
         for (_, statusItem) in statusItems {
             if statusItem.button != nil {
@@ -761,13 +833,18 @@ final class StatusBarUIManager {
         return statusItems[metricType]?.button
     }
 
-    /// Get the first enabled metric's button (for backwards compatibility)
+    /// Finds an actual item, including combined/default and deselected-active cases.
     var primaryButton: NSStatusBarButton? {
-        let config = DataStore.shared.loadMenuBarIconConfiguration()
-        guard let firstMetric = config.enabledMetrics.first else {
-            return nil
+        if let button = combinedStatusItem?.button { return button }
+        let config = ProfileManager.shared.activeProfile?.iconConfig ?? .default
+        for metric in config.enabledMetrics {
+            if let button = statusItems[metric.metricType]?.button { return button }
         }
-        return statusItems[firstMetric.metricType]?.button
+        if let button = statusItems[.session]?.button { return button }
+        for id in multiProfileOrder {
+            if let button = multiProfileStatusItems[id]?.button { return button }
+        }
+        return statusItems.values.compactMap(\.button).first
     }
 
     /// Find which metric type owns the given button (sender)
