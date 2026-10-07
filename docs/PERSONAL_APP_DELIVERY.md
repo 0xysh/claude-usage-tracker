@@ -73,6 +73,8 @@ In Settings > Popover, enable **Show accounts together**. The accounts selected
 in Manage Profiles appear in one scrollable popup, with Claude in green and Codex
 in purple. The existing separate menu-bar icons remain available; either opens
 the same combined popup. Disable this preference to restore individual popups.
+The existing Keyboard Shortcuts settings can assign Toggle Popover. The personal
+installation uses Control + Option + Command + U; macOS registration was verified.
 
 Each card uses its own profile's readings and errors. Missing readings show
 Unavailable, failed refreshes or readings older than five minutes show Last known,
