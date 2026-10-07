@@ -39,6 +39,8 @@ run is needed. Stop after those gates; this is not an unbounded feature rewrite.
 | P2 | Shared popup still created two separate provider menu items | One owned native item with stable autosave/width and readable provider/period/percentage segments, including Fable | Native lifecycle regression verifies 1 item for 2 accounts, same button/width after refresh and percentage toggle, 2 items after separate-mode restoration and 0 after cleanup |
 | P2 | Keyboard/reopen fallback returned nil when the active profile had no selected item or the default logo was used | Prefer the combined item, then actual configured/default/ordered selected-profile buttons | Actual reopen capture attempt exposed the missing window; native regression verifies a fallback for a deselected profile |
 | P2 | Test-host network logging could load/write the real app's diagnostic file | Test lifecycle keeps this logger in memory and never loads or saves the production file | Source guard in addition to isolated preferences |
+| P2 | The CLI settings/sidebar stayed green after a historical sync even when the saved token had expired | Classify the saved token and expiry without reading live credentials; expired/incomplete is orange, unknown expiry is neutral, future expiry means local readiness only | 12 synthetic status tests, including expiry advancing without snapshot mutation |
+| P2 | CLI sync accepted missing/expired tokens, ignored failed secure persistence, and saved success metadata separately | Validate token and expiry; commit credentials/metadata together; throw on failed save; refresh usage only after successful sync | Exact-body transaction regression failed in four methods before the fix; all 7 transaction tests pass afterward |
 | P3 | Small labels, unlabeled icon/traffic-light controls, missing Reduce Motion support | Larger readings/copy, named controls, native button semantics and motion preference | Source and light/dark render inspection |
 | P3 | Status-item cache could outlive removed buttons or ignore template/dimension changes | Clear lifecycle cache/timer; include image dimensions and template mode in its identity | Source inspection |
 | P3 | Normal percentage/badge changes could cross the menu item's coarse width boundary | Reserve three digits and the saved-reading badge before needed | Width regression covers normal range; preserves existing fixed-length crash mitigation |
@@ -136,6 +138,38 @@ The user's actual Codex weekly reading is saved 8%, marked with a clock; Claude
 and Fable remain unavailable. These are honest current display states, not
 evidence of a successful live connection. Synthetic Fable-zero rendering is
 verified separately and never substitutes TwinQuota's data.
+
+### CLI connection follow-up
+
+The user's later organization-selection screenshot showed one Claude.ai session
+with two organization entries. The CLI's official `claude auth status --text`
+reported **Expired — log in again**; its organization metadata matched the
+first personal organization. That check reads status metadata only and does not
+prove which organization currently has a paid quota. The browser wizard was
+still at organization selection; neither organization discovery nor a historical
+CLI sync flag establishes a successful usage response.
+
+The CLI status now uses a pure saved-snapshot classifier, reevaluated every
+30 seconds while settings are visible. It does not access the system login,
+Keychain or provider in the view body. Green means the saved token has a future
+expiry, not that a live request succeeded. Expired/incomplete snapshots receive
+an actionable warning; legacy snapshots without expiry remain neutral.
+
+CLI sync rejects missing/blank tokens, malformed expiry and known expired tokens.
+It checks secure persistence before reporting success, commits sync metadata in
+the same transaction, and notifies usage refresh only afterward. It preserves
+other profiles and accepts legacy tokens without expiry without classifying them
+as verified. Authentication endpoints and credential-source precedence are
+unchanged by this correction.
+
+All **19** focused classifier/transaction tests pass at
+`/private/tmp/claude-polish-audit/CLISyncGreen.xcresult`. Claude account matching
+also passes its 8 synthetic tests, and passive polling passes its 5 controls.
+The follow-up hosted full suite at `build/local-ci.6ylKKw/TestResults.xcresult`
+reports **358 tests: 356 passed, 0 failed, 2 skipped**. The same two unsigned
+Keychain limitations and Xcode 27 beta non-parity apply. Debug and optimized
+universal arm64/x86_64 Release builds also pass. Installation is deferred
+while the user's browser wizard is pending so unsaved login state is preserved.
 
 ## Remaining live gates
 

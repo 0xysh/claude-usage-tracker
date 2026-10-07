@@ -797,19 +797,25 @@ struct ProfileCredentialCardsRow: View {
     }
 
     var body: some View {
-        VStack(spacing: 4) {
-            ForEach(credentialSections, id: \.self) { section in
-                Button {
-                    selectedSection = section
-                } label: {
-                    CredentialMiniCard(
-                        icon: section.icon,
-                        title: cardTitle(for: section),
-                        isConnected: isConnected(section),
-                        isSelected: selectedSection == section
-                    )
+        TimelineView(.periodic(from: .now, by: 30)) { timeline in
+            let cliStatus = ClaudeCLIStatus.resolve(credentialsJSON: profileManager.activeProfile?.cliCredentialsJSON,
+                                                   now: timeline.date)
+            VStack(spacing: 4) {
+                ForEach(credentialSections, id: \.self) { section in
+                    Button {
+                        selectedSection = section
+                    } label: {
+                        CredentialMiniCard(
+                            icon: section.icon,
+                            title: cardTitle(for: section),
+                            isConnected: isConnected(section, cliStatus: cliStatus),
+                            isSelected: selectedSection == section,
+                            statusColor: section == .cliAccount ? cliStatusColor(cliStatus) : nil
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help(section == .cliAccount ? "\(cliStatus.title). \(cliStatus.detail)" : cardTitle(for: section))
                 }
-                .buttonStyle(.plain)
             }
         }
         .onAppear {
@@ -835,13 +841,21 @@ struct ProfileCredentialCardsRow: View {
         }
     }
 
-    private func isConnected(_ section: SettingsSection) -> Bool {
+    private func isConnected(_ section: SettingsSection, cliStatus: ClaudeCLIStatus) -> Bool {
         switch section {
         case .claudeAI: return credentials?.hasClaudeAI ?? false
         case .apiConsole: return credentials?.apiSessionKey != nil
-        case .cliAccount: return profileManager.activeProfile?.hasCliAccount ?? false
+        case .cliAccount: return cliStatus.isReadyLocally
         case .codexAccount: return profileManager.activeProfile?.hasUsageCredentials ?? false
         default: return false
+        }
+    }
+
+    private func cliStatusColor(_ status: ClaudeCLIStatus) -> Color {
+        switch status {
+        case .ready: return .green
+        case .expired, .incomplete: return .orange
+        case .notSaved, .expiryUnknown: return .gray.opacity(0.4)
         }
     }
 
@@ -856,6 +870,7 @@ struct CredentialMiniCard: View {
     let title: String
     let isConnected: Bool
     let isSelected: Bool
+    var statusColor: Color? = nil
     @State private var isHovered = false
 
     var body: some View {
@@ -875,7 +890,7 @@ struct CredentialMiniCard: View {
 
             // Status indicator
             Circle()
-                .fill(isSelected ? Color.white.opacity(0.9) : (isConnected ? Color.green : Color.gray.opacity(0.3)))
+                .fill(statusColor ?? (isSelected ? Color.white.opacity(0.9) : (isConnected ? Color.green : Color.gray.opacity(0.3))))
                 .frame(width: 5, height: 5)
         }
         .padding(.horizontal, 8)

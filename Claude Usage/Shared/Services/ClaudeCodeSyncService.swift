@@ -772,7 +772,20 @@ class ClaudeCodeSyncService {
 
     /// Syncs credentials from system to profile (one-time copy)
     func syncToProfile(_ profileId: UUID) throws {
-        guard let jsonData = try readSystemCredentials() else {
+        try syncToProfile(profileId,
+                          readCredentials: { try self.readSystemCredentials() },
+                          readAccount: { self.readOAuthAccount() },
+                          loadProfiles: { ProfileStore.shared.loadProfiles() },
+                          saveProfiles: { ProfileStore.shared.saveProfiles($0) })
+    }
+
+    /// A narrow seam for synthetic transaction tests; production uses the same body.
+    func syncToProfile(_ profileId: UUID,
+                       readCredentials: () throws -> String?,
+                       readAccount: () -> String?,
+                       loadProfiles: () -> [Profile],
+                       saveProfiles: ([Profile]) -> Bool) throws {
+        guard let jsonData = try readCredentials() else {
             throw ClaudeCodeError.noCredentialsFound
         }
 
@@ -782,21 +795,38 @@ class ClaudeCodeSyncService {
             throw ClaudeCodeError.invalidJSON
         }
 
+        guard let token = extractAccessToken(from: jsonData),
+              !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ClaudeCodeError.missingAccessToken
+        }
+        switch ClaudeCLIStatus.resolve(credentialsJSON: jsonData) {
+        case .expired:
+            throw ClaudeCodeError.credentialsExpired
+        case .incomplete, .notSaved:
+            throw ClaudeCodeError.invalidJSON
+        case .ready, .expiryUnknown:
+            // Legacy snapshots without expiry may still be saved. Their UI
+            // remains neutral until a provider refresh verifies the connection.
+            break
+        }
+
         // Capture current oauthAccount from .claude.json (if present) so we can
         // restore it when this profile is re-activated. See issue #175.
-        let capturedOAuthAccount = readOAuthAccount()
+        let capturedOAuthAccount = readAccount()
 
         // Save to profile directly
-        var profiles = ProfileStore.shared.loadProfiles()
+        var profiles = loadProfiles()
         guard let index = profiles.firstIndex(where: { $0.id == profileId }) else {
             throw ClaudeCodeError.noProfileCredentials
         }
 
         profiles[index].cliCredentialsJSON = jsonData
+        profiles[index].hasCliAccount = true
+        profiles[index].cliAccountSyncedAt = Date()
         if let capturedOAuthAccount = capturedOAuthAccount {
             profiles[index].oauthAccountJSON = capturedOAuthAccount
         }
-        ProfileStore.shared.saveProfiles(profiles)
+        guard saveProfiles(profiles) else { throw ClaudeCodeError.profileSaveFailed }
 
         LoggingService.shared.log("Synced CLI credentials to profile: \(profileId)\(capturedOAuthAccount != nil ? " (with oauthAccount)" : "")")
     }
@@ -1299,6 +1329,9 @@ class ClaudeCodeSyncService {
 enum ClaudeCodeError: LocalizedError {
     case noCredentialsFound
     case invalidJSON
+    case missingAccessToken
+    case credentialsExpired
+    case profileSaveFailed
     case keychainReadFailed(status: OSStatus)
     case keychainWriteFailed(status: OSStatus)
     case noProfileCredentials
@@ -1310,6 +1343,12 @@ enum ClaudeCodeError: LocalizedError {
             return "No Claude Code credentials found in system Keychain. Please log in to Claude Code first."
         case .invalidJSON:
             return "Claude Code credentials are corrupted or invalid."
+        case .missingAccessToken:
+            return "Claude Code credentials do not contain a usable access token. Sign in through Claude Code, then sync again."
+        case .credentialsExpired:
+            return "Claude Code credentials have expired. Run claude auth login, then sync again."
+        case .profileSaveFailed:
+            return "CLI credentials could not be saved securely. The sync was not completed; check the storage error and retry."
         case .keychainReadFailed(let status):
             return "Failed to read credentials from system Keychain (status: \(status))."
         case .keychainWriteFailed(let status):

@@ -20,6 +20,7 @@ struct Profile {
     var customKeychainServiceName: String?
     var oauthAccountJSON: String?
     var cliAccountSyncedAt: Date?
+    var hasCliAccount = false
     init(name: String, cliCredentialsJSON: String? = nil, oauthAccountJSON: String? = nil) {
         self.name = name
         self.cliCredentialsJSON = cliCredentialsJSON
@@ -30,7 +31,7 @@ final class ProfileStore {
     static let shared = ProfileStore()
     func loadProfiles() -> [Profile] { preconditionFailure("A pure identity check must not access storage") }
     func loadActiveProfileId() -> UUID? { preconditionFailure("A pure identity check must not access storage") }
-    func saveProfiles(_ profiles: [Profile]) { preconditionFailure("A pure identity check must not write storage") }
+    func saveProfiles(_ profiles: [Profile]) -> Bool { preconditionFailure("A pure identity check must not write storage") }
 }
 final class LoggingService {
     static let shared = LoggingService()
@@ -51,6 +52,7 @@ xcrun swiftc -emit-library -emit-module -enable-testing -module-name Claude_Usag
     -module-cache-path "$test_directory/module-cache" \
     -emit-module-path "$test_directory/Claude_Usage.swiftmodule" \
     "$test_directory/AppDependencies.swift" \
+    "$repo_root/Claude Usage/Shared/Models/ClaudeCLIStatus.swift" \
     "$repo_root/Claude Usage/Shared/Services/ClaudeCodeSyncService.swift" \
     -o "$test_directory/libClaude_Usage.dylib"
 

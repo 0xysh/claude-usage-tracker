@@ -105,6 +105,16 @@ error while preserving the last reading. Reconnect and sync through Claude Code
 when prompted. Browser organization discovery uses only the requested profile's
 session, and an in-flight response cannot be saved into a newly active profile.
 Each card can refresh its own account or open that account's credential settings.
+The CLI settings/sidebar distinguish missing, incomplete, expired and locally
+ready saved credentials. A green CLI indicator means only that its saved token
+has a future expiry; refreshing usage verifies the provider connection. Unknown
+expiry stays neutral. Sync rejects unusable or expired credentials, reports
+secure-save failures and commits credentials plus sync metadata together before
+triggering a usage refresh. If `claude auth status --text` reports an expired
+login, run `claude auth login` and then use **Resync** in CLI Account.
+Claude.ai's organization picker lists organizations belonging to the browser
+session, not separate app profiles. Select the intended organization and complete
+**Next → Save Configuration**; discovery alone does not save the connection.
 Saved readings use a clock and neutral menu-bar styling; missing readings retain
 their profile label. The tooltip names session/week percentages and used/remaining
 mode. The combined summary takes precedence over both single- and multi-profile
