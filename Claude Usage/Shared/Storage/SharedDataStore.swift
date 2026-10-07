@@ -75,6 +75,7 @@ class SharedDataStore {
         static let autoSwitchProfileEnabled = "autoSwitchProfileEnabled"
 
         // Popover Settings
+        static let popoverShowAllProfiles = "popoverShowAllProfiles"
         static let popoverShowRemainingTime = "popoverShowRemainingTime" // legacy bool key
         static let popoverTimeDisplay = "popoverTimeDisplay"
         static let timeFormatPreference = "timeFormatPreference"
@@ -625,6 +626,14 @@ class SharedDataStore {
     }
 
     // MARK: - Popover Settings
+
+    func savePopoverShowAllProfiles(_ enabled: Bool) {
+        defaults.set(enabled, forKey: Keys.popoverShowAllProfiles)
+    }
+
+    func loadPopoverShowAllProfiles() -> Bool {
+        defaults.bool(forKey: Keys.popoverShowAllProfiles)
+    }
 
     func savePopoverTimeDisplay(_ display: PopoverTimeDisplay) {
         defaults.set(display.rawValue, forKey: Keys.popoverTimeDisplay)

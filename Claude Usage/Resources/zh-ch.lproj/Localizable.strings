@@ -59,6 +59,10 @@
 /* ==================== */
 "menubar.claude_usage" = "Claude 使用情况";
 "menubar.session_usage" = "会话使用量";
+"menubar.five_hour_limit" = "5小时上限";
+"menubar.weekly_all_models" = "每周 - 所有模型";
+"menubar.weekly_fable" = "每周 - Fable";
+"menubar.weekly_model" = "每周 - %@";
 "menubar.weekly_usage" = "每周";
 "menubar.opus_usage" = "Opus";
 "menubar.sonnet_usage" = "Sonnet";
@@ -890,16 +894,16 @@
 /* MARK: - Mobile App (Coming Soon) */
 /* ==================== */
 "section.mobile_app_title" = "移动应用";
-"section.mobile_app_desc" = "移动应用即将推出";
+"section.mobile_app_desc" = "对移动应用的关注";
 "mobile.title" = "移动应用";
-"mobile.subtitle" = "随时随地追踪您的Claude使用情况";
-"mobile.coming_soon_badge" = "即将推出";
-"mobile.cta_message" = "感兴趣吗？告诉我们，准备好后我们会通知您。";
-"mobile.notify_me" = "通知我";
+"mobile.subtitle" = "可能推出的用量查看配套移动应用";
+"mobile.coming_soon_badge" = "考虑中";
+"mobile.cta_message" = "在这台Mac上保存您的关注。暂无发布日期或通知服务。";
+"mobile.notify_me" = "在本机保存关注";
 "mobile.submitting" = "提交中...";
-"mobile.notified" = "您已在列表中！";
-"mobile.notified_desc" = "移动应用可用时我们会通知您。";
-"mobile.privacy_note" = "不收集任何个人数据。这仅记录您的兴趣。";
+"mobile.notified" = "关注已保存在这台Mac上";
+"mobile.notified_desc" = "此本地偏好不会让您订阅通知。";
+"mobile.privacy_note" = "不会发送任何数据。此偏好仅保存在这台Mac上。";
 "mobile.error_title" = "请求失败";
 "mobile.error_message" = "无法注册您的兴趣。请检查您的网络连接并重试。";
 
@@ -933,13 +937,13 @@
 "feedback.title_label" = "角色";
 "feedback.contact_placeholder" = "邮箱";
 "feedback.message_placeholder" = "告诉我们任何事情 — 反馈、想法、功能建议...";
-"feedback.submit" = "提交";
+"feedback.submit" = "打开GitHub草稿";
 "feedback.submitting" = "提交中...";
 "feedback.remind_later" = "稍后提醒";
 "feedback.never_show" = "不再询问";
 "feedback.thanks" = "感谢您的反馈！";
-"feedback.error_title" = "提交失败";
-"feedback.error_message" = "无法发送您的反馈。请稍后重试。";
+"feedback.error_title" = "无法打开草稿";
+"feedback.error_message" = "您的消息仍保留在此。请重试，或在GitHub上手动打开您的分叉仓库。";
 "feedback.role_developer" = "开发者";
 "feedback.role_designer" = "设计师";
 "feedback.role_manager" = "经理";
@@ -1079,3 +1083,12 @@
 "support.popup_signature" = "Claude Usage 背后的一人团队";
 "support.popup_body" = "免费、开源、一人开发——没有广告，没有跟踪。如果它曾帮你避免烧掉会话额度，一杯咖啡就能让它继续前进。";
 "support.popup_days" = "已守护你的额度 %d 天 — 永久免费";
+
+// Personal fork: reviewable feedback drafts and local mobile interest
+"mobile.clear_interest" = "清除本地关注";
+"feedback.public_issue_notice" = "这会在公开的GitHub仓库中打开草稿。请在发布前检查，不要包含凭据或个人信息。";
+"feedback.draft_opened" = "在浏览器中继续";
+"feedback.draft_opened_desc" = "请在GitHub上检查草稿并自行发布。应用尚未发布您的反馈。";
+"feedback.edit_draft" = "返回消息";
+"feedback.draft_too_long" = "此消息过长，无法通过浏览器草稿链接打开。请缩短消息，或打开空白GitHub草稿并手动粘贴。文本仍保留在此。";
+"feedback.open_empty_draft" = "打开空白GitHub草稿";

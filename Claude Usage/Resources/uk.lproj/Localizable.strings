@@ -58,6 +58,10 @@
 /* ==================== */
 "menubar.claude_usage" = "Використання Claude";
 "menubar.session_usage" = "Використання сесії";
+"menubar.five_hour_limit" = "Ліміт на 5 годин";
+"menubar.weekly_all_models" = "За тиждень - усі моделі";
+"menubar.weekly_fable" = "За тиждень - Fable";
+"menubar.weekly_model" = "За тиждень - %@";
 "menubar.weekly_usage" = "Тижневе";
 "menubar.opus_usage" = "Opus";
 "menubar.sonnet_usage" = "Sonnet";
@@ -817,13 +821,13 @@
 "feedback.role_researcher" = "Дослідник";
 "feedback.role_student" = "Студент";
 "feedback.role_other" = "Інше";
-"feedback.submit" = "Надіслати";
+"feedback.submit" = "Відкрити чернетку GitHub";
 "feedback.submitting" = "Надсилання...";
 "feedback.thanks" = "Дякуємо за відгук!";
 "feedback.never_show" = "Більше не питати";
 "feedback.remind_later" = "Нагадати пізніше";
-"feedback.error_title" = "Помилка відправлення";
-"feedback.error_message" = "Не вдалося надіслати ваш відгук. Будь ласка, спробуйте пізніше.";
+"feedback.error_title" = "Не вдалося відкрити чернетку";
+"feedback.error_message" = "Ваше повідомлення залишається тут. Спробуйте ще раз або відкрийте свій форк на GitHub вручну.";
 
 /* ==================== */
 /* MARK: - Usage History */
@@ -873,14 +877,14 @@
 /* MARK: - Mobile App */
 /* ==================== */
 "mobile.title" = "Мобільний додаток";
-"mobile.subtitle" = "Відстежуйте використання Claude де завгодно";
-"mobile.coming_soon_badge" = "НЕЗАБАРОМ";
-"mobile.cta_message" = "Зацікавлені? Повідомте нас, і ми сповістимо вас, коли буде готово.";
-"mobile.notify_me" = "Сповістити мене";
-"mobile.notified" = "Ви в списку!";
-"mobile.notified_desc" = "Ми повідомимо вас, коли мобільний додаток буде доступний.";
+"mobile.subtitle" = "Можливий мобільний застосунок для перегляду використання";
+"mobile.coming_soon_badge" = "НА РОЗГЛЯДІ";
+"mobile.cta_message" = "Збережіть зацікавленість на цьому Mac. Дати випуску чи служби сповіщень немає.";
+"mobile.notify_me" = "Зберегти зацікавленість локально";
+"mobile.notified" = "Зацікавленість збережено на цьому Mac";
+"mobile.notified_desc" = "Це локальне налаштування не підписує вас на сповіщення.";
 "mobile.submitting" = "Надсилання...";
-"mobile.privacy_note" = "Особисті дані не збираються. Це лише реєструє вашу зацікавленість.";
+"mobile.privacy_note" = "Нічого не надсилається. Це налаштування залишається на цьому Mac.";
 "mobile.error_title" = "Запит не вдався";
 "mobile.error_message" = "Не вдалося зареєструвати вашу зацікавленість. Будь ласка, перевірте підключення до інтернету та спробуйте ще раз.";
 
@@ -929,7 +933,7 @@
 "section.debug_title" = "Інструменти розробника";
 "section.debug_desc" = "Журналювання мережі та діагностика";
 "section.mobile_app_title" = "Мобільний додаток";
-"section.mobile_app_desc" = "Мобільний додаток незабаром";
+"section.mobile_app_desc" = "Зацікавленість у мобільному застосунку";
 "section.support_title" = "Підтримка";
 "section.support_desc" = "Підтримайте розробку проекту";
 "section.app_settings_title" = "Налаштування";
@@ -1088,3 +1092,12 @@
 "support.popup_signature" = "команда з однієї людини за Claude Usage";
 "support.popup_body" = "Безплатний, з відкритим кодом, зроблений однією людиною — без реклами й стеження. Якщо він урятував вас від спаленого ліміту сесії, кава тримає його живим.";
 "support.popup_days" = "Пильнує ваші ліміти вже %d днів — завжди безплатно";
+
+// Personal fork: reviewable feedback drafts and local mobile interest
+"mobile.clear_interest" = "Видалити локальну зацікавленість";
+"feedback.public_issue_notice" = "Чернетка відкриється в публічному репозиторії GitHub. Перевірте її перед публікацією. Не додавайте облікові чи особисті дані.";
+"feedback.draft_opened" = "Продовжити в браузері";
+"feedback.draft_opened_desc" = "Перевірте чернетку й опублікуйте її самостійно на GitHub. Застосунок не опублікував ваш відгук.";
+"feedback.edit_draft" = "Повернутися до повідомлення";
+"feedback.draft_too_long" = "Це повідомлення задовге для чернетки в браузері. Скоротіть його або відкрийте порожню чернетку GitHub і вставте повідомлення вручну. Текст залишається тут.";
+"feedback.open_empty_draft" = "Відкрити порожню чернетку GitHub";

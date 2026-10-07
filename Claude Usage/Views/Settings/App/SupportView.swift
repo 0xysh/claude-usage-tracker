@@ -123,7 +123,7 @@ struct SupportView: View {
                         .foregroundColor(.secondary)
 
                     Button(action: {
-                        if let url = URL(string: "https://github.com/hamed-elfayome/Claude-Usage-Tracker") {
+                        if let url = URL(string: Constants.GitHub.repoURL) {
                             NSWorkspace.shared.open(url)
                         }
                     }) {

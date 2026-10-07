@@ -58,6 +58,10 @@
 /* ==================== */
 "menubar.claude_usage" = "Claude Usage";
 "menubar.session_usage" = "Mức dùng phiên";
+"menubar.five_hour_limit" = "Giới hạn 5 giờ";
+"menubar.weekly_all_models" = "Hàng tuần - tất cả các mô hình";
+"menubar.weekly_fable" = "Hàng tuần - Fable";
+"menubar.weekly_model" = "Hàng tuần - %@";
 "menubar.weekly_usage" = "Hàng tuần";
 "menubar.opus_usage" = "Opus";
 "menubar.sonnet_usage" = "Sonnet";
@@ -900,16 +904,16 @@
 /* MARK: - Mobile App (Coming Soon) */
 /* ==================== */
 "section.mobile_app_title" = "Ứng dụng di động";
-"section.mobile_app_desc" = "Ứng dụng di động sắp ra mắt";
+"section.mobile_app_desc" = "Sự quan tâm đến ứng dụng di động";
 "mobile.title" = "Ứng dụng di động";
-"mobile.subtitle" = "Theo dõi mức dùng Claude của bạn khi di chuyển";
-"mobile.coming_soon_badge" = "SẮP RA MẮT";
-"mobile.cta_message" = "Bạn quan tâm? Hãy cho chúng tôi biết và chúng tôi sẽ thông báo khi sẵn sàng.";
-"mobile.notify_me" = "Thông báo cho tôi";
+"mobile.subtitle" = "Một ứng dụng di động bổ trợ có thể được phát triển";
+"mobile.coming_soon_badge" = "ĐANG XEM XÉT";
+"mobile.cta_message" = "Lưu sự quan tâm trên máy Mac này. Chưa có ngày phát hành hoặc dịch vụ thông báo.";
+"mobile.notify_me" = "Lưu sự quan tâm trên máy";
 "mobile.submitting" = "Đang gửi...";
-"mobile.notified" = "Bạn đã có trong danh sách!";
-"mobile.notified_desc" = "Chúng tôi sẽ báo cho bạn khi ứng dụng di động sẵn sàng.";
-"mobile.privacy_note" = "Không có dữ liệu cá nhân nào được thu thập. Điều này chỉ đăng ký sự quan tâm của bạn.";
+"mobile.notified" = "Đã lưu sự quan tâm trên máy Mac này";
+"mobile.notified_desc" = "Tùy chọn cục bộ này không đăng ký nhận thông báo.";
+"mobile.privacy_note" = "Không có dữ liệu nào được gửi. Tùy chọn này chỉ được lưu trên máy Mac này.";
 "mobile.error_title" = "Yêu cầu thất bại";
 "mobile.error_message" = "Không thể đăng ký sự quan tâm của bạn. Vui lòng kiểm tra kết nối internet và thử lại.";
 
@@ -943,13 +947,13 @@
 "feedback.title_label" = "Vai trò";
 "feedback.contact_placeholder" = "Email";
 "feedback.message_placeholder" = "Hãy cho chúng tôi biết bất cứ điều gì — phản hồi, ý tưởng, đề xuất tính năng...";
-"feedback.submit" = "Gửi";
+"feedback.submit" = "Mở bản nháp GitHub";
 "feedback.submitting" = "Đang gửi...";
 "feedback.remind_later" = "Nhắc tôi sau";
 "feedback.never_show" = "Không hỏi lại";
 "feedback.thanks" = "Cảm ơn bạn đã phản hồi!";
-"feedback.error_title" = "Gửi thất bại";
-"feedback.error_message" = "Không thể gửi phản hồi của bạn. Vui lòng thử lại sau.";
+"feedback.error_title" = "Không thể mở bản nháp";
+"feedback.error_message" = "Tin nhắn của bạn vẫn ở đây. Hãy thử lại hoặc tự mở bản fork của bạn trên GitHub.";
 "feedback.role_developer" = "Nhà phát triển";
 "feedback.role_designer" = "Nhà thiết kế";
 "feedback.role_manager" = "Quản lý";
@@ -1091,3 +1095,12 @@
 "support.popup_body" = "Miễn phí, mã nguồn mở, do một người xây dựng — không quảng cáo, không theo dõi. Nếu nó từng giúp bạn khỏi lãng phí giới hạn phiên, một ly cà phê sẽ giúp nó tiếp tục.";
 "support.popup_days" = "Đồng hành cùng giới hạn của bạn %d ngày — luôn miễn phí";
 "support.popup_later" = "Để sau";
+
+// Personal fork: reviewable feedback drafts and local mobile interest
+"mobile.clear_interest" = "Xóa sự quan tâm đã lưu";
+"feedback.public_issue_notice" = "Bản nháp sẽ mở trong kho GitHub công khai. Hãy kiểm tra trước khi đăng. Không đưa thông tin đăng nhập hoặc dữ liệu cá nhân vào.";
+"feedback.draft_opened" = "Tiếp tục trong trình duyệt";
+"feedback.draft_opened_desc" = "Kiểm tra bản nháp và tự đăng trên GitHub. Ứng dụng chưa đăng phản hồi của bạn.";
+"feedback.edit_draft" = "Quay lại tin nhắn";
+"feedback.draft_too_long" = "Tin nhắn này quá dài cho bản nháp trong trình duyệt. Hãy rút ngắn hoặc mở bản nháp GitHub trống rồi tự dán tin nhắn. Văn bản vẫn ở đây.";
+"feedback.open_empty_draft" = "Mở bản nháp GitHub trống";

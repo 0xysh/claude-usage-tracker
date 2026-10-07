@@ -140,7 +140,7 @@ final class BorderlessSettingsWindow: NSWindow {
 
 /// Builds the settings window — fully borderless, no system titlebar.
 enum SettingsWindowBuilder {
-    static func makeWindow(size: CGSize) -> NSWindow {
+    static func makeWindow(size: CGSize, initialSection: SettingsSection = .appearance) -> NSWindow {
         let window = BorderlessSettingsWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: .borderless,
@@ -149,7 +149,7 @@ enum SettingsWindowBuilder {
         )
 
         let hostingView = NSHostingView(rootView:
-            SettingsView()
+            SettingsView(initialSection: initialSection)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         )
         hostingView.translatesAutoresizingMaskIntoConstraints = false
@@ -209,7 +209,8 @@ struct TrafficLightButton: View {
     private var isActive: Bool { controlActiveState == .key }
 
     var body: some View {
-        Circle()
+        Button(action: performAction) {
+          Circle()
             .fill(isActive ? type.activeColor : Color.primary.opacity(0.15))
             .frame(width: 12, height: 12)
             .overlay {
@@ -219,8 +220,12 @@ struct TrafficLightButton: View {
                         .foregroundColor(.black.opacity(0.5))
                 }
             }
-            .onHover { isHovered = $0 }
-            .onTapGesture { performAction() }
+        }
+        .buttonStyle(.plain)
+        .frame(width: 22, height: 22)
+        .contentShape(Rectangle())
+        .accessibilityLabel(type == .close ? "Close settings" : type == .miniaturize ? "Minimize settings" : "Zoom settings")
+        .onHover { isHovered = $0 }
     }
 
     private func performAction() {
@@ -239,6 +244,10 @@ struct SettingsView: View {
     @StateObject private var profileManager = ProfileManager.shared
     @Environment(\.colorScheme) private var colorScheme
 
+    init(initialSection: SettingsSection = .appearance) {
+        _selectedSection = State(initialValue: initialSection)
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             // Sidebar with Profile Switcher
@@ -253,11 +262,6 @@ struct SettingsView: View {
 
                 // Profile Section (Switcher + Credentials + Settings)
                 ProfileSectionContainer(selectedSection: $selectedSection)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-
-                // Sponsor slot (available placement)
-                SponsorSlotCard()
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
 
@@ -333,6 +337,9 @@ struct SettingsView: View {
         }
         .frame(minWidth: 720, maxWidth: 720, maxHeight: .infinity)
         .background(SettingsBackground())
+        .onReceive(NotificationCenter.default.publisher(for: .settingsSectionRequested)) { notification in
+            if let section = notification.object as? SettingsSection { selectedSection = section }
+        }
     }
 }
 
@@ -790,19 +797,25 @@ struct ProfileCredentialCardsRow: View {
     }
 
     var body: some View {
-        VStack(spacing: 4) {
-            ForEach(credentialSections, id: \.self) { section in
-                Button {
-                    selectedSection = section
-                } label: {
-                    CredentialMiniCard(
-                        icon: section.icon,
-                        title: cardTitle(for: section),
-                        isConnected: isConnected(section),
-                        isSelected: selectedSection == section
-                    )
+        TimelineView(.periodic(from: .now, by: 30)) { timeline in
+            let cliStatus = ClaudeCLIStatus.resolve(credentialsJSON: profileManager.activeProfile?.cliCredentialsJSON,
+                                                   now: timeline.date)
+            VStack(spacing: 4) {
+                ForEach(credentialSections, id: \.self) { section in
+                    Button {
+                        selectedSection = section
+                    } label: {
+                        CredentialMiniCard(
+                            icon: section.icon,
+                            title: cardTitle(for: section),
+                            isConnected: isConnected(section, cliStatus: cliStatus),
+                            isSelected: selectedSection == section,
+                            statusColor: section == .cliAccount ? cliStatusColor(cliStatus) : nil
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help(section == .cliAccount ? "\(cliStatus.title). \(cliStatus.detail)" : cardTitle(for: section))
                 }
-                .buttonStyle(.plain)
             }
         }
         .onAppear {
@@ -828,13 +841,21 @@ struct ProfileCredentialCardsRow: View {
         }
     }
 
-    private func isConnected(_ section: SettingsSection) -> Bool {
+    private func isConnected(_ section: SettingsSection, cliStatus: ClaudeCLIStatus) -> Bool {
         switch section {
         case .claudeAI: return credentials?.hasClaudeAI ?? false
         case .apiConsole: return credentials?.apiSessionKey != nil
-        case .cliAccount: return profileManager.activeProfile?.hasCliAccount ?? false
+        case .cliAccount: return cliStatus.isReadyLocally
         case .codexAccount: return profileManager.activeProfile?.hasUsageCredentials ?? false
         default: return false
+        }
+    }
+
+    private func cliStatusColor(_ status: ClaudeCLIStatus) -> Color {
+        switch status {
+        case .ready: return .green
+        case .expired, .incomplete: return .orange
+        case .notSaved, .expiryUnknown: return .gray.opacity(0.4)
         }
     }
 
@@ -849,6 +870,7 @@ struct CredentialMiniCard: View {
     let title: String
     let isConnected: Bool
     let isSelected: Bool
+    var statusColor: Color? = nil
     @State private var isHovered = false
 
     var body: some View {
@@ -868,7 +890,7 @@ struct CredentialMiniCard: View {
 
             // Status indicator
             Circle()
-                .fill(isSelected ? Color.white.opacity(0.9) : (isConnected ? Color.green : Color.gray.opacity(0.3)))
+                .fill(statusColor ?? (isSelected ? Color.white.opacity(0.9) : (isConnected ? Color.green : Color.gray.opacity(0.3))))
                 .frame(width: 5, height: 5)
         }
         .padding(.horizontal, 8)

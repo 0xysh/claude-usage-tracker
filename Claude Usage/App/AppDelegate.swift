@@ -7,6 +7,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     private var setupWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        // Hosted unit tests need the app module, not its user lifecycle. The
+        // shared scheme sets this only for TestAction, before any login stores,
+        // preferences, timers, provider requests, or interactive UI are touched.
+        if ProcessInfo.processInfo.environment["CLAUDE_USAGE_UNIT_TEST_HOST"] == "1" {
+            return
+        }
+        #endif
+
         // Disable window restoration for menu bar app
         UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
 
@@ -49,7 +58,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         // `menuBarManager` reference even if the wizard never visibly opens.
         menuBarManager = MenuBarManager()
 
-        // Start 24-hour heartbeat ping to track active app usage
+        // Keep the daily activity record locally; no telemetry leaves this Mac.
         HeartbeatService.shared.start()
 
         // Claude Code notch HUD (opt-in): start the hook listener + HUD when
@@ -235,6 +244,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        #if DEBUG
+        // No app services were started in the isolated unit-test host.
+        if ProcessInfo.processInfo.environment["CLAUDE_USAGE_UNIT_TEST_HOST"] == "1" {
+            return
+        }
+        #endif
+
         // Cleanup
         NotchHookServer.shared.stop()
         NotchHUDController.shared.stop()
@@ -269,6 +285,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         // Keep running even if all windows are closed
         return false
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Opening the installed app again should reveal its interface, even
+        // when it has only a menu-bar item and no Dock window.
+        if let menuBarManager {
+            menuBarManager.showDashboard()
+        } else {
+            setupWindow?.makeKeyAndOrderFront(nil)
+        }
+        return true
     }
 
     func application(_ application: NSApplication, willEncodeRestorableState coder: NSCoder) {

@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 
 /// Service for fetching usage data directly from Claude's API
 class ClaudeAPIService: APIServiceProtocol {
@@ -270,7 +271,7 @@ class ClaudeAPIService: APIServiceProtocol {
             let startTime = Date()
             let (data, response): (Data, URLResponse)
             do {
-                (data, response) = try await URLSession.shared.data(for: request)
+                (data, response) = try await UsagePollingSessionDelegate.session.data(for: request)
             } catch {
                 // Network errors
                 let duration = Date().timeIntervalSince(startTime)
@@ -478,15 +479,8 @@ class ClaudeAPIService: APIServiceProtocol {
 
     /// Fetches usage data via OAuth access token (CLI credential flow)
     func fetchUsageData(oauthAccessToken: String) async throws -> ClaudeUsage {
-        guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
-            throw AppError(code: .urlMalformed, message: "Invalid OAuth usage endpoint", isRecoverable: false)
-        }
-
-        var request = buildAuthenticatedRequest(url: url, auth: .cliOAuth(oauthAccessToken))
-        request.httpMethod = "GET"
-        request.timeoutInterval = 30
-
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let request = UsagePollingRequest.claudeOAuth(accessToken: oauthAccessToken)
+        let (data, response) = try await UsagePollingSessionDelegate.session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AppError(code: .apiInvalidResponse, message: "Invalid response from OAuth endpoint", isRecoverable: true)
@@ -541,94 +535,10 @@ class ClaudeAPIService: APIServiceProtocol {
 
             return claudeUsage
 
-        case .cliOAuth:
-            // The dedicated OAuth usage endpoint (api.anthropic.com/api/oauth/usage) is disabled.
-            // Instead, make a minimal Messages API call and extract usage from response headers.
-            LoggingService.shared.log("ClaudeAPIService: Fetching usage via Messages API headers (OAuth)")
-
-            guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
-                throw AppError(
-                    code: .urlMalformed,
-                    message: "Invalid Messages API endpoint",
-                    isRecoverable: false
-                )
-            }
-
-            var request = buildAuthenticatedRequest(url: url, auth: auth)
-            request.httpMethod = "POST"
-            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-            request.timeoutInterval = 30
-
-            // Minimal request: cheapest model, 1 token, to get rate limit headers
-            let body: [String: Any] = [
-                "model": "claude-haiku-4-5-20251001",
-                "max_tokens": 1,
-                "messages": [["role": "user", "content": "hi"]]
-            ]
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-            let startTime = Date()
-            let (data, response): (Data, URLResponse)
-            do {
-                (data, response) = try await URLSession.shared.data(for: request)
-            } catch {
-                let duration = Date().timeIntervalSince(startTime)
-                NetworkLoggerService.shared.logRequest(
-                    url: url.absoluteString,
-                    method: "POST",
-                    requestBody: request.httpBody,
-                    responseData: nil,
-                    statusCode: nil,
-                    duration: duration,
-                    error: error
-                )
-                throw error
-            }
-
-            let duration = Date().timeIntervalSince(startTime)
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw AppError(
-                    code: .apiInvalidResponse,
-                    message: "Invalid response from Messages API",
-                    isRecoverable: true
-                )
-            }
-
-            // Log to NetworkLoggerService
-            NetworkLoggerService.shared.logRequest(
-                url: url.absoluteString,
-                method: "POST",
-                requestBody: request.httpBody,
-                responseData: data,
-                statusCode: httpResponse.statusCode,
-                duration: duration,
-                error: nil
-            )
-
-            // A 429 means the account is at its rate limit — which is exactly
-            // what we're here to measure. The unified rate-limit headers are
-            // still present on 429 responses, so parse them instead of
-            // failing the refresh right when the user most needs the data.
-            let has429UsageHeaders = httpResponse.statusCode == 429
-                && httpResponse.value(forHTTPHeaderField: "anthropic-ratelimit-unified-5h-utilization") != nil
-
-            guard httpResponse.statusCode == 200 || has429UsageHeaders else {
-                let responsePreview = String(data: data, encoding: .utf8)?.prefix(200) ?? "Unable to read response"
-                throw AppError(
-                    code: httpResponse.statusCode == 429 ? .apiRateLimited : .apiUnauthorized,
-                    message: httpResponse.statusCode == 429
-                        ? "Rate limited by Claude API"
-                        : "OAuth Messages API request failed",
-                    technicalDetails: "Status: \(httpResponse.statusCode)\nResponse: \(responsePreview)",
-                    isRecoverable: true,
-                    recoverySuggestion: httpResponse.statusCode == 429
-                        ? "Usage is at its limit — data will refresh once the rate limit window resets"
-                        : "Please re-sync your CLI account in Settings"
-                )
-            }
-
-            return parseUsageFromRateLimitHeaders(httpResponse)
+        case .cliOAuth(let accessToken):
+            // Poll account usage without sending a prompt or consuming model usage.
+            // If the endpoint is unavailable, surface its error; never probe a model.
+            return try await fetchUsageData(oauthAccessToken: accessToken)
 
         case .consoleAPISession:
             // Console API is for billing/credits only, not usage data
@@ -665,7 +575,7 @@ class ClaudeAPIService: APIServiceProtocol {
         let startTime = Date()
         let (data, response): (Data, URLResponse)
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await UsagePollingSessionDelegate.session.data(for: request)
         } catch {
             // Network-level errors
             let duration = Date().timeIntervalSince(startTime)
@@ -788,7 +698,7 @@ class ClaudeAPIService: APIServiceProtocol {
 
     // MARK: - Response Parsing
 
-    private func parseUsageResponse(_ data: Data) throws -> ClaudeUsage {
+    func parseUsageResponse(_ data: Data) throws -> ClaudeUsage {
         // Parse Claude's actual API response structure
 
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -856,13 +766,12 @@ class ClaudeAPIService: APIServiceProtocol {
             // Extract Fable weekly usage (seven_day_fable)
             var fablePercentage = 0.0
             var fableResetTime: Date? = nil
-            if let sevenDayFable = json["seven_day_fable"] as? [String: Any] {
-                if let utilization = sevenDayFable["utilization"] {
-                    fablePercentage = parseUtilization(utilization)
-                }
-                if let resetsAt = sevenDayFable["resets_at"] as? String {
-                    fableResetTime = resetTimeFormatter.date(from: resetsAt)
-                }
+            var fableAvailable = false
+            if let sevenDayFable = json["seven_day_fable"] as? [String: Any],
+               let utilization = parseFableUtilization(sevenDayFable["utilization"]) {
+                fableAvailable = true
+                fablePercentage = utilization
+                fableResetTime = parseFableResetTime(sevenDayFable["resets_at"], formatter: resetTimeFormatter)
             }
 
             // Newer API responses null out the legacy seven_day_* per-model
@@ -875,10 +784,7 @@ class ClaudeAPIService: APIServiceProtocol {
                 for limit in limits {
                     guard limit["kind"] as? String == "weekly_scoped",
                           let scope = limit["scope"] as? [String: Any],
-                          let model = scope["model"] as? [String: Any],
-                          let percentValue = limit["percent"] else { continue }
-                    let percent = parseUtilization(percentValue)
-                    let resetTime = (limit["resets_at"] as? String).flatMap { resetTimeFormatter.date(from: $0) }
+                          let model = scope["model"] as? [String: Any] else { continue }
 
                     // Match on the stable model id when the API provides one;
                     // display_name is a rename-prone human label kept as fallback.
@@ -889,9 +795,17 @@ class ClaudeAPIService: APIServiceProtocol {
                     }
 
                     if matches("fable", "mythos") {
-                        fablePercentage = percent
-                        fableResetTime = resetTime ?? fableResetTime
-                    } else if matches("opus") {
+                        let percent = parseFableUtilization(limit["percent"])
+                        fableAvailable = percent != nil
+                        fablePercentage = percent ?? 0
+                        fableResetTime = percent == nil ? nil : parseFableResetTime(limit["resets_at"], formatter: resetTimeFormatter)
+                        continue
+                    }
+
+                    guard let percentValue = limit["percent"] else { continue }
+                    let percent = parseUtilization(percentValue)
+                    let resetTime = (limit["resets_at"] as? String).flatMap { resetTimeFormatter.date(from: $0) }
+                    if matches("opus") {
                         opusPercentage = percent
                     } else if matches("sonnet") {
                         sonnetPercentage = percent
@@ -913,7 +827,7 @@ class ClaudeAPIService: APIServiceProtocol {
             let opusTokens = Int(Double(weeklyLimit) * (opusPercentage / 100.0))
             let sonnetTokens = Int(Double(weeklyLimit) * (sonnetPercentage / 100.0))
             let designTokens = Int(Double(weeklyLimit) * (designPercentage / 100.0))
-            let fableTokens = Int(Double(weeklyLimit) * (fablePercentage / 100.0))
+            let fableTokens = Int(min(Double(weeklyLimit) * (fablePercentage / 100.0), Double(Int.max).nextDown))
 
             let usage = ClaudeUsage(
                 sessionTokensUsed: sessionTokens,
@@ -935,6 +849,7 @@ class ClaudeAPIService: APIServiceProtocol {
                 fableWeeklyTokensUsed: fableTokens,
                 fableWeeklyPercentage: fablePercentage,
                 fableWeeklyResetTime: fableResetTime,
+                fableUsageAvailable: fableAvailable,
                 costUsed: nil,
                 costLimit: nil,
                 costCurrency: nil,
@@ -1063,6 +978,36 @@ class ClaudeAPIService: APIServiceProtocol {
         // Log warning if we couldn't parse
         LoggingService.shared.logWarning("Failed to parse utilization value: \(value) (type: \(type(of: value)))")
         return 0.0
+    }
+
+    /// Missing or malformed model data is different from a reported 0%.
+    /// JSON booleans bridge to NSNumber too, so reject them explicitly.
+    private func parseFableUtilization(_ value: Any?) -> Double? {
+        let percentage: Double
+        if let number = value as? NSNumber {
+            guard CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+            percentage = number.doubleValue
+        } else if let string = value as? String {
+            var cleaned = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            if cleaned.hasSuffix("%") {
+                cleaned.removeLast()
+                cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            guard !cleaned.contains("%"), let parsed = Double(cleaned) else { return nil }
+            percentage = parsed
+        } else {
+            return nil
+        }
+        guard percentage.isFinite, percentage >= 0 else { return nil }
+        return percentage
+    }
+
+    private func parseFableResetTime(_ value: Any?, formatter: ISO8601DateFormatter) -> Date? {
+        guard let value = value as? String else { return nil }
+        if let date = formatter.date(from: value) { return date }
+        let wholeSecondsFormatter = ISO8601DateFormatter()
+        wholeSecondsFormatter.formatOptions = [.withInternetDateTime]
+        return wholeSecondsFormatter.date(from: value)
     }
 
     // MARK: - Session Initialization

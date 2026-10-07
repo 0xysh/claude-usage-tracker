@@ -603,12 +603,13 @@ struct ProviderLogoView: View {
     var size: CGFloat = 14
 
     var body: some View {
-        if let image = NSImage(named: provider.descriptor.logoAssetName) {
-            Image(nsImage: image)
+        if NSImage(named: provider.descriptor.logoAssetName) != nil {
+            Image(provider.descriptor.logoAssetName)
                 .resizable()
-                .renderingMode(.template)
+                .renderingMode(.original)
                 .aspectRatio(contentMode: .fit)
                 .frame(width: size, height: size)
+                .accessibilityHidden(true)
         } else {
             Image(systemName: provider.descriptor.logoSystemSymbolFallback)
                 .font(.system(size: size * 0.85, weight: .medium))

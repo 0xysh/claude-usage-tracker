@@ -29,40 +29,51 @@ struct CLIAccountView: View {
                 )
 
                 if let profile = profileManager.activeProfile {
-                    // Professional Status Card
-                    HStack(spacing: DesignTokens.Spacing.medium) {
-                        Circle()
-                            .fill(profile.hasCliAccount ? Color.green : Color.secondary.opacity(0.4))
-                            .frame(width: DesignTokens.StatusDot.standard, height: DesignTokens.StatusDot.standard)
+                    // Classify only the saved snapshot. A historical sync flag
+                    // cannot establish that the CLI login is still usable.
+                    TimelineView(.periodic(from: .now, by: 30)) { timeline in
+                        let status = ClaudeCLIStatus.resolve(credentialsJSON: profile.cliCredentialsJSON, now: timeline.date)
+                        HStack(alignment: .top, spacing: DesignTokens.Spacing.medium) {
+                            Circle()
+                                .fill(statusColor(status))
+                                .frame(width: DesignTokens.StatusDot.standard, height: DesignTokens.StatusDot.standard)
+                                .padding(.top, 4)
 
-                        VStack(alignment: .leading, spacing: DesignTokens.Spacing.extraSmall) {
-                            Text(profile.hasCliAccount ? "cli.synced".localized : "cli.not_synced".localized)
-                                .font(DesignTokens.Typography.bodyMedium)
-
-                            if profile.hasCliAccount, let syncedAt = profile.cliAccountSyncedAt {
-                                Text(syncedAt, style: .relative)
+                            VStack(alignment: .leading, spacing: DesignTokens.Spacing.extraSmall) {
+                                Text(status.title)
+                                    .font(DesignTokens.Typography.bodyMedium)
+                                Text(status.detail)
                                     .font(DesignTokens.Typography.caption)
                                     .foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if profile.cliCredentialsJSON != nil, let syncedAt = profile.cliAccountSyncedAt {
+                                    HStack(spacing: 4) {
+                                        Text("Last synced")
+                                        Text(syncedAt, style: .relative)
+                                    }
+                                    .font(DesignTokens.Typography.caption)
+                                    .foregroundColor(.secondary)
+                                }
                             }
-                        }
 
-                        Spacer()
+                            Spacer()
+                        }
+                        .padding(DesignTokens.Spacing.medium)
+                        .background(DesignTokens.Colors.cardBackground)
+                        .cornerRadius(DesignTokens.Radius.card)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: DesignTokens.Radius.card)
+                                .strokeBorder(DesignTokens.Colors.cardBorder, lineWidth: 1)
+                        )
                     }
-                    .padding(DesignTokens.Spacing.medium)
-                    .background(DesignTokens.Colors.cardBackground)
-                    .cornerRadius(DesignTokens.Radius.card)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: DesignTokens.Radius.card)
-                            .strokeBorder(DesignTokens.Colors.cardBorder, lineWidth: 1)
-                    )
 
                     // Credentials & Actions Card
                     SettingsSectionCard(
                         title: "cli.account_details".localized,
-                        subtitle: profile.hasCliAccount ? "cli.credentials_synced".localized : "cli.no_credentials".localized
+                        subtitle: profile.cliCredentialsJSON != nil ? "Saved CLI credentials" : "cli.no_credentials".localized
                     ) {
                         VStack(alignment: .leading, spacing: DesignTokens.Spacing.cardPadding) {
-                            if profile.hasCliAccount, let json = profile.cliCredentialsJSON {
+                            if let json = profile.cliCredentialsJSON {
                                 // Credentials Display
                                 VStack(alignment: .leading, spacing: DesignTokens.Spacing.medium) {
                                     // Access Token
@@ -168,7 +179,7 @@ struct CLIAccountView: View {
                                             Image(systemName: "arrow.triangle.2.circlepath")
                                                 .font(.system(size: DesignTokens.Icons.small))
                                         }
-                                        Text(profile.hasCliAccount ? "cli.resync".localized : "cli.sync_from_code".localized)
+                                        Text(profile.cliCredentialsJSON != nil ? "cli.resync".localized : "cli.sync_from_code".localized)
                                             .font(DesignTokens.Typography.body)
                                     }
                                 }
@@ -176,7 +187,7 @@ struct CLIAccountView: View {
                                 .controlSize(.regular)
                                 .disabled(isSyncing)
 
-                                if profile.hasCliAccount {
+                                if profile.cliCredentialsJSON != nil {
                                     Button(action: removeSync) {
                                         HStack(spacing: DesignTokens.Spacing.extraSmall) {
                                             Image(systemName: "trash")
@@ -301,6 +312,14 @@ struct CLIAccountView: View {
         selectedKeychainSvc = profileManager.activeProfile?.customKeychainServiceName
     }
 
+    private func statusColor(_ status: ClaudeCLIStatus) -> Color {
+        switch status {
+        case .ready: return .green
+        case .expired, .incomplete: return .orange
+        case .notSaved, .expiryUnknown: return .secondary.opacity(0.4)
+        }
+    }
+
     /// Enumerates Claude Code keychain entries via SecItemCopyMatching and also
     /// builds a human-readable label for each (email + org from any matching
     /// profile.oauthAccountJSON; subscription type as fallback). Runs off the main
@@ -352,15 +371,12 @@ struct CLIAccountView: View {
             // Reload profiles to get the updated cliCredentialsJSON
             profileManager.loadProfiles()
 
-            // Update profile metadata
-            if var updated = profileManager.activeProfile {
-                updated.hasCliAccount = true
-                updated.cliAccountSyncedAt = Date()
-                profileManager.updateProfile(updated)
-            }
-
             // Load account info
             loadCLIAccountInfo()
+
+            // The service validates and commits credentials plus sync metadata
+            // together. Notify only after it reports a successful transaction.
+            NotificationCenter.default.post(name: .credentialsChanged, object: profileId)
 
             LoggingService.shared.log("CLIAccountView: CLI sync complete, credentials saved to profile")
         } catch {

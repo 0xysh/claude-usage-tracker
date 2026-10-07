@@ -56,6 +56,10 @@
 /* ==================== */
 "menubar.claude_usage" = "Uso do Claude";
 "menubar.session_usage" = "Uso da Sessão";
+"menubar.five_hour_limit" = "Limite de 5 horas";
+"menubar.weekly_all_models" = "Semanal - todos os modelos";
+"menubar.weekly_fable" = "Semanal - Fable";
+"menubar.weekly_model" = "Semanal - %@";
 "menubar.weekly_usage" = "Semanal";
 "menubar.opus_usage" = "Opus";
 "menubar.sonnet_usage" = "Sonnet";
@@ -890,16 +894,16 @@
 /* MARK: - Mobile App (Coming Soon) */
 /* ==================== */
 "section.mobile_app_title" = "App Móvel";
-"section.mobile_app_desc" = "App móvel em breve";
+"section.mobile_app_desc" = "Interesse numa aplicação móvel";
 "mobile.title" = "App Móvel";
-"mobile.subtitle" = "Acompanhe seu uso do Claude em qualquer lugar";
-"mobile.coming_soon_badge" = "EM BREVE";
-"mobile.cta_message" = "Interessado? Nos avise e te notificaremos quando estiver pronto.";
-"mobile.notify_me" = "Me avise";
+"mobile.subtitle" = "Uma possível aplicação complementar para a sua utilização";
+"mobile.coming_soon_badge" = "EM AVALIAÇÃO";
+"mobile.cta_message" = "Guarde o seu interesse neste Mac. Não há data de lançamento nem serviço de notificações.";
+"mobile.notify_me" = "Guardar interesse localmente";
 "mobile.submitting" = "Enviando...";
-"mobile.notified" = "Você está na lista!";
-"mobile.notified_desc" = "Avisaremos quando o app móvel estiver disponível.";
-"mobile.privacy_note" = "Nenhum dado pessoal é coletado. Isso apenas registra seu interesse.";
+"mobile.notified" = "Interesse guardado neste Mac";
+"mobile.notified_desc" = "Esta preferência local não o inscreve em notificações.";
+"mobile.privacy_note" = "Nada é enviado. Esta preferência fica neste Mac.";
 "mobile.error_title" = "Falha na solicitação";
 "mobile.error_message" = "Não foi possível registrar seu interesse. Verifique sua conexão com a internet e tente novamente.";
 
@@ -933,13 +937,13 @@
 "feedback.title_label" = "Função";
 "feedback.contact_placeholder" = "Email";
 "feedback.message_placeholder" = "Conte-nos qualquer coisa — opiniões, ideias, sugestões...";
-"feedback.submit" = "Enviar";
+"feedback.submit" = "Abrir rascunho no GitHub";
 "feedback.submitting" = "Enviando...";
 "feedback.remind_later" = "Lembrar Depois";
 "feedback.never_show" = "Não Perguntar Mais";
 "feedback.thanks" = "Obrigado pelo seu feedback!";
-"feedback.error_title" = "Falha no Envio";
-"feedback.error_message" = "Não foi possível enviar seu feedback. Tente novamente mais tarde.";
+"feedback.error_title" = "Não foi possível abrir o rascunho";
+"feedback.error_message" = "A sua mensagem continua aqui. Tente novamente ou abra o seu fork manualmente no GitHub.";
 "feedback.role_developer" = "Desenvolvedor";
 "feedback.role_designer" = "Designer";
 "feedback.role_manager" = "Gerente";
@@ -1093,3 +1097,12 @@
 "support.popup_signature" = "a equipa de uma só pessoa por trás do Claude Usage";
 "support.popup_body" = "Grátis, open source, feita por uma só pessoa — sem anúncios nem rastreio. Se já te salvou de queimar um limite de sessão, um café mantém-na viva.";
 "support.popup_days" = "A vigiar os teus limites há %d dias — sempre grátis";
+
+// Personal fork: reviewable feedback drafts and local mobile interest
+"mobile.clear_interest" = "Limpar interesse local";
+"feedback.public_issue_notice" = "Isto abre um rascunho num repositório público do GitHub. Reveja antes de publicar. Não inclua credenciais nem dados pessoais.";
+"feedback.draft_opened" = "Continuar no navegador";
+"feedback.draft_opened_desc" = "Reveja o rascunho e publique-o pessoalmente no GitHub. A aplicação não publicou o seu comentário.";
+"feedback.edit_draft" = "Voltar à mensagem";
+"feedback.draft_too_long" = "Esta mensagem é demasiado longa para um rascunho no navegador. Encurte-a ou abra um rascunho vazio no GitHub e cole a mensagem manualmente. O texto fica aqui.";
+"feedback.open_empty_draft" = "Abrir rascunho vazio no GitHub";

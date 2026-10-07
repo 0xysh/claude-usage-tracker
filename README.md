@@ -1,3 +1,34 @@
+## Personal fork
+
+This fork is maintained at [0xysh/claude-usage-tracker](https://github.com/0xysh/claude-usage-tracker).
+Daily activity records and mobile-interest preferences stay on the Mac. Feedback
+opens a draft in this fork's Issues; the user reviews and publishes it on GitHub.
+Provider monitoring still connects to Anthropic and OpenAI.
+
+The personal app uses a separate `com.0xysh.ClaudeUsage` identity. Profile names
+and statusline configuration are treated as data. Claude OAuth polling reads
+usage without generating a model response. Codex credentials from the CLI's
+shared file are read-only here; Codex itself owns their refresh. Credential-bearing
+Codex requests accept only the official HTTPS ChatGPT hosts, not custom proxies.
+These account endpoints still require live verification with the user's account.
+
+A local Apple Development build can be packaged with
+`./scripts/package_personal_app.sh <public-signing-identity-sha1>` after resolving
+the pinned dependencies. It creates an app and ZIP under `release/personal/`
+without installing, launching, notarizing, or publishing. Public update releases
+continue to require the separate Developer ID/Pages setup above.
+
+Personal updates use this fork's own feed and Ed25519 key, with Sparkle 2.10.0.
+The first signed personal release and Pages deployment have not been published;
+see [personal update setup](docs/PERSONAL_UPDATES.md). Original author credits and
+upstream installation information below refer to the original distribution.
+
+Validate the ownership behavior without launching the app or loading login stores:
+
+```sh
+./scripts/test_personal_ownership.sh
+```
+
 <div align="center">
   <a href="mailto:hamedelfayome@gmail.com?subject=Claude%20Usage%20Tracker%20%E2%80%94%20Sponsorship"><img src="https://claudetracker.com/asset/sponsor.svg" alt="Sponsor slot available — get in touch: hamedelfayome@gmail.com" height="44"></a>
 </div>
@@ -43,7 +74,7 @@ Claude Usage Tracker is a lightweight, native macOS menu bar application that pr
 - **Customizable Interface**: 5 icon styles + 3 color modes (Multi-Color/Greyscale/Single Color) + per-element statusline colors + remaining/used percentage toggle
 - **Smart Automation**: Auto-start sessions, auto-switch profiles, threshold notifications
 - **Developer Tools**: Terminal statusline integration with model, context, profile display, weekly/extra usage segments, pace markers, per-element colors, and color modes
-- **Privacy-First**: Credentials in the macOS Keychain, local storage, minimal anonymous analytics (version-only heartbeat), no cloud sync
+- **Privacy-First**: Local storage, a local-only daily activity record, and no cloud sync; credentials require verified secure storage, with no new plaintext fallback
 - **Native Performance**: Lightweight Swift/SwiftUI design for macOS
 
 <div align="center">
@@ -414,7 +445,7 @@ Plain `claude` keeps following the **active** profile, exactly as before. Removi
 - **Advanced Error Handling**: Professional error system with user-friendly recovery
 - **Robust Validation**: Session key and API endpoint validation
 - Local storage with no cloud sync
-- Minimal anonymous analytics (version-only heartbeat every 24h — no PII, no credentials)
+- Daily app-version activity record stored locally; no remote heartbeat
 - HTTPS-only communication with Claude API
 
 ### Advanced Capabilities
@@ -760,7 +791,7 @@ The app can simultaneously monitor both web (claude.ai) and API console usage, p
 - **Apple Code Signed**: Officially signed with Apple Developer certificate for verified authenticity
 - **Secure Updates**: Automatic updates delivered over HTTPS with code signature verification
 - **No Cloud Sync**: All data remains local to your machine
-- **Minimal Analytics**: Anonymous heartbeat every 24 hours containing only the app version — no PII, no credentials, no usage data
+- **Local Activity Record**: The latest daily app-version record stays on this Mac; no heartbeat is sent to a remote server
 - **Advanced Error Handling**: Robust error system with user-friendly recovery
 - **Session Key Validation**: Comprehensive validation of API credentials
 - **Network**: HTTPS-only communication with claude.ai and Anthropic API

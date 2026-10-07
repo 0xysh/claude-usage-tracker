@@ -58,6 +58,10 @@
 /* ==================== */
 "menubar.claude_usage" = "Claude使用状況";
 "menubar.session_usage" = "セッション使用";
+"menubar.five_hour_limit" = "5時間の上限";
+"menubar.weekly_all_models" = "週次 - すべてのモデル";
+"menubar.weekly_fable" = "週次 - Fable";
+"menubar.weekly_model" = "週次 - %@";
 "menubar.weekly_usage" = "週次";
 "menubar.opus_usage" = "Opus";
 "menubar.sonnet_usage" = "Sonnet";
@@ -892,16 +896,16 @@
 /* MARK: - Mobile App (Coming Soon) */
 /* ==================== */
 "section.mobile_app_title" = "モバイルアプリ";
-"section.mobile_app_desc" = "モバイルアプリ近日公開";
+"section.mobile_app_desc" = "モバイルアプリへの関心";
 "mobile.title" = "モバイルアプリ";
-"mobile.subtitle" = "外出先でClaudeの使用状況を確認";
-"mobile.coming_soon_badge" = "近日公開";
-"mobile.cta_message" = "興味がありますか？お知らせください。準備ができたら通知します。";
-"mobile.notify_me" = "通知する";
+"mobile.subtitle" = "使用状況を確認するモバイルアプリの案";
+"mobile.coming_soon_badge" = "検討中";
+"mobile.cta_message" = "このMacに関心を保存します。リリース予定日や通知サービスはありません。";
+"mobile.notify_me" = "関心をこのMacに保存";
 "mobile.submitting" = "送信中...";
-"mobile.notified" = "リストに登録されました！";
-"mobile.notified_desc" = "モバイルアプリが利用可能になったらお知らせします。";
-"mobile.privacy_note" = "個人データは収集されません。興味の登録のみです。";
+"mobile.notified" = "関心をこのMacに保存しました";
+"mobile.notified_desc" = "このローカル設定では通知サービスに登録されません。";
+"mobile.privacy_note" = "何も送信しません。この設定はこのMacにのみ保存されます。";
 "mobile.error_title" = "リクエスト失敗";
 "mobile.error_message" = "興味を登録できませんでした。インターネット接続を確認して再度お試しください。";
 
@@ -935,13 +939,13 @@
 "feedback.title_label" = "役割";
 "feedback.contact_placeholder" = "メールアドレス";
 "feedback.message_placeholder" = "何でもお聞かせください — 感想、アイデア、機能リクエスト...";
-"feedback.submit" = "送信";
+"feedback.submit" = "GitHubで下書きを開く";
 "feedback.submitting" = "送信中...";
 "feedback.remind_later" = "後で通知";
 "feedback.never_show" = "今後表示しない";
 "feedback.thanks" = "フィードバックありがとうございます！";
-"feedback.error_title" = "送信失敗";
-"feedback.error_message" = "フィードバックを送信できませんでした。後でもう一度お試しください。";
+"feedback.error_title" = "下書きを開けませんでした";
+"feedback.error_message" = "メッセージはここに残っています。再試行するか、GitHubで自分のフォークを手動で開いてください。";
 "feedback.role_developer" = "開発者";
 "feedback.role_designer" = "デザイナー";
 "feedback.role_manager" = "マネージャー";
@@ -1093,3 +1097,12 @@
 "support.popup_signature" = "Claude Usage を一人で作っています";
 "support.popup_body" = "無料・オープンソース・個人開発。広告もトラッキングもありません。セッション上限の浪費を防いだことがあるなら、一杯のコーヒーが開発を支えます。";
 "support.popup_days" = "あなたの上限を見守って %d 日 — ずっと無料";
+
+// Personal fork: reviewable feedback drafts and local mobile interest
+"mobile.clear_interest" = "保存した関心を削除";
+"feedback.public_issue_notice" = "公開GitHubリポジトリで下書きを開きます。投稿前に確認し、認証情報や個人情報を含めないでください。";
+"feedback.draft_opened" = "ブラウザで続ける";
+"feedback.draft_opened_desc" = "GitHubで下書きを確認し、自分で投稿してください。このアプリはフィードバックを投稿していません。";
+"feedback.edit_draft" = "メッセージに戻る";
+"feedback.draft_too_long" = "ブラウザの下書きに使うにはメッセージが長すぎます。短くするか、GitHubで空の下書きを開いて自分で貼り付けてください。テキストはここに残ります。";
+"feedback.open_empty_draft" = "GitHubで空の下書きを開く";

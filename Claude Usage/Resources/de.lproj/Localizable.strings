@@ -58,6 +58,10 @@
 /* ==================== */
 "menubar.claude_usage" = "Claude-Nutzung";
 "menubar.session_usage" = "Sitzungsnutzung";
+"menubar.five_hour_limit" = "5-Stunden-Limit";
+"menubar.weekly_all_models" = "Wöchentlich - alle Modelle";
+"menubar.weekly_fable" = "Wöchentlich - Fable";
+"menubar.weekly_model" = "Wöchentlich - %@";
 "menubar.weekly_usage" = "Wöchentlich";
 "menubar.opus_usage" = "Opus";
 "menubar.sonnet_usage" = "Sonnet";
@@ -892,16 +896,16 @@
 /* MARK: - Mobile App (Coming Soon) */
 /* ==================== */
 "section.mobile_app_title" = "Mobile App";
-"section.mobile_app_desc" = "Mobile App kommt bald";
+"section.mobile_app_desc" = "Interesse an einer mobilen App";
 "mobile.title" = "Mobile App";
-"mobile.subtitle" = "Verfolge deine Claude-Nutzung unterwegs";
-"mobile.coming_soon_badge" = "DEMNÄCHST";
-"mobile.cta_message" = "Interessiert? Lass es uns wissen und wir benachrichtigen dich, wenn es fertig ist.";
-"mobile.notify_me" = "Benachrichtige mich";
+"mobile.subtitle" = "Eine mögliche Begleit-App für deine Nutzung";
+"mobile.coming_soon_badge" = "IN PLANUNG";
+"mobile.cta_message" = "Speichere dein Interesse auf diesem Mac. Es gibt keinen Veröffentlichungstermin oder Benachrichtigungsdienst.";
+"mobile.notify_me" = "Interesse lokal speichern";
 "mobile.submitting" = "Wird gesendet...";
-"mobile.notified" = "Du bist auf der Liste!";
-"mobile.notified_desc" = "Wir informieren dich, wenn die Mobile App verfügbar ist.";
-"mobile.privacy_note" = "Es werden keine persönlichen Daten erhoben. Dies registriert nur dein Interesse.";
+"mobile.notified" = "Interesse auf diesem Mac gespeichert";
+"mobile.notified_desc" = "Diese lokale Einstellung meldet dich nicht für Benachrichtigungen an.";
+"mobile.privacy_note" = "Es wird nichts gesendet. Diese Einstellung bleibt auf diesem Mac.";
 "mobile.error_title" = "Anfrage fehlgeschlagen";
 "mobile.error_message" = "Dein Interesse konnte nicht registriert werden. Bitte überprüfe deine Internetverbindung und versuche es erneut.";
 
@@ -935,13 +939,13 @@
 "feedback.title_label" = "Rolle";
 "feedback.contact_placeholder" = "Email";
 "feedback.message_placeholder" = "Erzähl uns alles — Feedback, Ideen, Feature-Wünsche...";
-"feedback.submit" = "Absenden";
+"feedback.submit" = "GitHub-Entwurf öffnen";
 "feedback.submitting" = "Wird gesendet...";
 "feedback.remind_later" = "Später Erinnern";
 "feedback.never_show" = "Nicht Mehr Fragen";
 "feedback.thanks" = "Danke für dein Feedback!";
-"feedback.error_title" = "Senden Fehlgeschlagen";
-"feedback.error_message" = "Feedback konnte nicht gesendet werden. Bitte versuche es später erneut.";
+"feedback.error_title" = "Entwurf konnte nicht geöffnet werden";
+"feedback.error_message" = "Deine Nachricht ist noch hier. Versuche es erneut oder öffne deinen Fork manuell auf GitHub.";
 "feedback.role_developer" = "Entwickler";
 "feedback.role_designer" = "Designer";
 "feedback.role_manager" = "Manager";
@@ -1093,3 +1097,12 @@
 "support.popup_signature" = "das Ein-Personen-Team hinter Claude Usage";
 "support.popup_body" = "Kostenlos, Open Source, von einer Person gebaut — ohne Werbung, ohne Tracking. Hat es dich je vor einem verbrannten Session-Limit bewahrt, hält ein Kaffee es am Leben.";
 "support.popup_days" = "Behält deine Limits seit %d Tagen im Blick — für immer kostenlos";
+
+// Personal fork: reviewable feedback drafts and local mobile interest
+"mobile.clear_interest" = "Lokales Interesse löschen";
+"feedback.public_issue_notice" = "Dies öffnet einen Entwurf in einem öffentlichen GitHub-Repository. Prüfe ihn vor der Veröffentlichung. Gib keine Zugangsdaten oder persönlichen Angaben an.";
+"feedback.draft_opened" = "Im Browser fortfahren";
+"feedback.draft_opened_desc" = "Prüfe den Entwurf und veröffentliche ihn selbst auf GitHub. Die App hat dein Feedback nicht veröffentlicht.";
+"feedback.edit_draft" = "Zur Nachricht zurückkehren";
+"feedback.draft_too_long" = "Diese Nachricht ist zu lang für einen Browser-Entwurf. Kürze sie oder öffne einen leeren GitHub-Entwurf und füge deine Nachricht selbst ein. Dein Text bleibt hier.";
+"feedback.open_empty_draft" = "Leeren GitHub-Entwurf öffnen";

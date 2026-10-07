@@ -8,14 +8,15 @@
 import Cocoa
 import Combine
 
-/// Manages multiple menu bar status items for different metrics
+/// Owns the combined summary or the separate profile/metric menu bar items.
 final class StatusBarUIManager {
     // Dictionary to hold multiple status items keyed by metric type (single profile mode)
     private var statusItems: [MenuBarMetricType: NSStatusItem] = [:]
 
     // Dictionary to hold status items keyed by profile ID (multi-profile mode)
     private var multiProfileStatusItems: [UUID: NSStatusItem] = [:]
-
+    private var multiProfileOrder: [UUID] = []
+    private var combinedStatusItem: NSStatusItem?
 
     // Current display mode
     private var isMultiProfileMode: Bool = false
@@ -48,6 +49,7 @@ final class StatusBarUIManager {
     }
     /// Returns a stable autosaveName for the default logo (no credentials)
     private static let defaultLogoAutosaveName: NSStatusItem.AutosaveName = "\(autosavePrefix).defaultLogo"
+    private static let combinedAutosaveName: NSStatusItem.AutosaveName = "\(autosavePrefix).combinedSummary"
 
     /// Fixed placeholder length for freshly-created multi-profile status items. Creating
     /// them at a concrete length (rather than .variableLength) avoids the macOS 26 (Tahoe)
@@ -119,6 +121,10 @@ final class StatusBarUIManager {
 
     /// Updates status bar items based on new configuration (incremental approach)
     func updateConfiguration(target: AnyObject, action: Selector, config: MenuBarIconConfiguration) {
+        guard !isMultiProfileMode, combinedStatusItem == nil else {
+            setup(target: target, action: action, config: config)
+            return
+        }
         // Determine what the new set of items should be
         let newMetricTypes: Set<MenuBarMetricType>
         if config.enabledMetrics.isEmpty {
@@ -135,6 +141,7 @@ final class StatusBarUIManager {
         for metricType in itemsToRemove {
             if let statusItem = statusItems[metricType] {
                 if let button = statusItem.button {
+                    lastImageData.removeValue(forKey: ObjectIdentifier(button))
                     button.image = nil
                     button.action = nil
                     button.target = nil
@@ -177,6 +184,9 @@ final class StatusBarUIManager {
     }
 
     func cleanup() {
+        appearanceDebounceTimer?.invalidate()
+        appearanceDebounceTimer = nil
+        lastImageData.removeAll()
         appearanceObservers.forEach { $0.invalidate() }
         appearanceObservers.removeAll()
 
@@ -203,6 +213,17 @@ final class StatusBarUIManager {
             NSStatusBar.system.removeStatusItem(statusItem)
         }
         multiProfileStatusItems.removeAll()
+        multiProfileOrder.removeAll()
+
+        if let statusItem = combinedStatusItem {
+            if let button = statusItem.button {
+                button.image = nil
+                button.action = nil
+                button.target = nil
+            }
+            NSStatusBar.system.removeStatusItem(statusItem)
+        }
+        combinedStatusItem = nil
 
         isMultiProfileMode = false
 
@@ -210,6 +231,54 @@ final class StatusBarUIManager {
     }
 
     // MARK: - Multi-Profile Mode
+
+    /// Creates one fixed-width summary item. Usage updates retain its identity.
+    func setupCombinedProfileSummary(profiles: [Profile], config: MultiProfileDisplayConfig,
+                                     errors: [UUID: String], target: AnyObject, action: Selector) {
+        cleanup()
+        let presentation = CombinedMenuBarPresentation(profiles: profiles, config: config, errors: errors)
+        let item = NSStatusBar.system.statusItem(withLength: CGFloat(presentation.reservedWidth))
+        item.autosaveName = Self.combinedAutosaveName
+        item.isVisible = true
+        if let button = item.button {
+            button.title = ""
+            button.action = action
+            button.target = target
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            button.toolTip = presentation.tooltip
+            button.setAccessibilityLabel(presentation.tooltip)
+        } else {
+            LoggingService.shared.logWarning("Combined status bar button is nil - screens: \(NSScreen.screens.count)")
+        }
+        combinedStatusItem = item
+        observeAppearanceChanges()
+        LoggingService.shared.logUIEvent("Combined menu bar initialized with one status item")
+    }
+
+    /// Refreshes the existing item without a variable-width AppKit layout solve.
+    func updateCombinedProfileSummary(profiles: [Profile], config: MultiProfileDisplayConfig,
+                                      errors: [UUID: String]) {
+        guard let item = combinedStatusItem, let button = item.button else { return }
+        let presentation = CombinedMenuBarPresentation(profiles: profiles, config: config, errors: errors)
+        let isDarkMode = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let image = renderer.createCombinedProfileSummary(profiles: profiles, config: config,
+                                                         errors: errors, isDarkMode: isDarkMode)
+        // The presentation reserves the same width for used/remaining, saved,
+        // missing, and reported-zero values; only selection/layout changes resize.
+        let width = CGFloat(presentation.reservedWidth)
+        if abs(item.length - width) > 0.5 { item.length = width }
+        button.title = ""
+        button.toolTip = presentation.tooltip
+        button.setAccessibilityLabel(presentation.tooltip)
+        setButtonImage(button, image: image)
+    }
+
+    var isInCombinedProfileMode: Bool { combinedStatusItem != nil }
+
+    /// The actual owned items, used to verify layout transitions and cleanup.
+    var statusItemCount: Int {
+        statusItems.count + multiProfileStatusItems.count + (combinedStatusItem == nil ? 0 : 1)
+    }
 
     /// Sets up status bar for multi-profile display mode
     func setupMultiProfile(profiles: [Profile], target: AnyObject, action: Selector) {
@@ -220,6 +289,8 @@ final class StatusBarUIManager {
 
         // Filter to only profiles selected for display
         let selectedProfiles = profiles.filter { $0.isSelectedForDisplay }
+        multiProfileOrder = selectedProfiles.isEmpty
+            ? [Self.defaultLogoPlaceholderUUID] : selectedProfiles.map(\.id)
 
         if selectedProfiles.isEmpty {
             // No profiles selected - show default logo
@@ -278,6 +349,8 @@ final class StatusBarUIManager {
         }
 
         let selectedProfiles = profiles.filter { $0.isSelectedForDisplay }
+        multiProfileOrder = selectedProfiles.isEmpty
+            ? [Self.defaultLogoPlaceholderUUID] : selectedProfiles.map(\.id)
         let newProfileIds: Set<UUID> = selectedProfiles.isEmpty
             ? [Self.defaultLogoPlaceholderUUID]
             : Set(selectedProfiles.map { $0.id })
@@ -288,6 +361,7 @@ final class StatusBarUIManager {
         for profileId in idsToRemove {
             if let statusItem = multiProfileStatusItems[profileId] {
                 if let button = statusItem.button {
+                    lastImageData.removeValue(forKey: ObjectIdentifier(button))
                     button.image = nil
                     button.action = nil
                     button.target = nil
@@ -349,7 +423,7 @@ final class StatusBarUIManager {
     }
 
     /// Updates all multi-profile status items
-    func updateMultiProfileButtons(profiles: [Profile], config: MultiProfileDisplayConfig, activeProfileId: UUID? = nil) {
+    func updateMultiProfileButtons(profiles: [Profile], config: MultiProfileDisplayConfig, activeProfileId: UUID? = nil, errors: [UUID: String] = [:]) {
         guard isMultiProfileMode else { return }
 
         for profile in profiles where profile.isSelectedForDisplay {
@@ -362,11 +436,31 @@ final class StatusBarUIManager {
             let menuBarIsDark = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
 
             // Get usage data for this profile
-            let usage = profile.claudeUsage ?? ClaudeUsage.empty
+            let presentation = MenuBarUsagePresentation(usage: profile.claudeUsage,
+                                                       refreshFailed: errors[profile.id] != nil,
+                                                       showRemaining: config.showRemainingPercentage)
+            let description = presentation.tooltip(profileName: profile.name, showWeek: config.showWeek,
+                                                   error: errors[profile.id])
+            button.toolTip = description
+            button.setAccessibilityLabel(description)
+            guard let usage = profile.claudeUsage else {
+                button.title = ""
+                let image = renderer.createMultiProfilePercentage(
+                    sessionPercentage: nil, weekPercentage: nil, sessionStatus: .safe, weekStatus: .safe,
+                    profileName: config.showProfileLabel ? profile.name : nil,
+                    monochromeMode: true, isDarkMode: menuBarIsDark, showWeek: config.showWeek)
+                image.isTemplate = true
+                let length = MenuBarUsagePresentation.itemLength(imageWidth: image.size.width,
+                                                                 percentageStyle: config.iconStyle == .percentage)
+                if abs(statusItem.length - length) > 0.5 { statusItem.length = length }
+                setButtonImage(button, image: image)
+                continue
+            }
+            button.title = ""
             let showRemaining = config.showRemainingPercentage
 
             // Calculate percentages
-            let sessionUsed = usage.effectiveSessionPercentage
+            let sessionUsed = presentation.state == .fresh ? usage.effectiveSessionPercentage : usage.sessionPercentage
             let weekUsed = usage.weeklyPercentage
 
             let sessionDisplay = UsageStatusCalculator.getDisplayPercentage(
@@ -423,7 +517,8 @@ final class StatusBarUIManager {
 
             // Create icon based on selected style
             let image: NSImage
-            switch config.iconStyle {
+            let missingWindow = presentation.sessionPercentage == nil || (config.showWeek && presentation.weeklyPercentage == nil)
+            switch missingWindow ? .percentage : config.iconStyle {
             case .concentric:
                 if config.showProfileLabel {
                     image = renderer.createConcentricIconWithLabel(
@@ -487,8 +582,8 @@ final class StatusBarUIManager {
                 )
             case .percentage:
                 image = renderer.createMultiProfilePercentage(
-                    sessionPercentage: sessionDisplay,
-                    weekPercentage: config.showWeek ? weekDisplay : nil,
+                    sessionPercentage: presentation.sessionPercentage,
+                    weekPercentage: config.showWeek ? presentation.weeklyPercentage : nil,
                     sessionStatus: sessionStatus,
                     weekStatus: weekStatus,
                     profileName: config.showProfileLabel ? profile.name : nil,
@@ -497,18 +592,21 @@ final class StatusBarUIManager {
                     useSystemColor: false,
                     sessionPaceStatus: sessionPaceStatus,
                     weekPaceStatus: config.showWeek ? weekPaceStatus : nil,
-                    showPaceMarker: config.showPaceMarker
+                    showPaceMarker: config.showPaceMarker && presentation.state == .fresh && !missingWindow,
+                    showWeek: config.showWeek
                 )
             }
 
+            let stateImage = presentation.state == .lastKnown
+                ? renderer.createLastKnownIcon(from: image, isDarkMode: menuBarIsDark) : image
             let finalImage: NSImage
             if profile.id == activeProfileId && config.showActiveProfileIndicator {
-                let underlinedImage = addGreenUnderline(to: image)
+                let underlinedImage = addGreenUnderline(to: stateImage)
                 underlinedImage.isTemplate = false
                 finalImage = underlinedImage
             } else {
-                image.isTemplate = useMonochrome && !config.showPaceMarker
-                finalImage = image
+                stateImage.isTemplate = useMonochrome && !config.showPaceMarker && presentation.state == .fresh
+                finalImage = stateImage
             }
 
             // macOS 26 (Tahoe) crash fix: with NSStatusItem.variableLength, AppKit
@@ -523,11 +621,12 @@ final class StatusBarUIManager {
             // per-pixel width jitter between updates (e.g. "5%" vs "45%") would still
             // crash. Round the width up to a coarse grid so ordinary data changes never
             // move the length, and only assign when it genuinely changes.
-            let stableLength = ceil(finalImage.size.width / 32.0) * 32.0
+            let stableLength = MenuBarUsagePresentation.itemLength(imageWidth: image.size.width,
+                                                                  percentageStyle: config.iconStyle == .percentage || missingWindow)
             if abs(statusItem.length - stableLength) > 0.5 {
                 statusItem.length = stableLength
             }
-            button.image = finalImage
+            setButtonImage(button, image: finalImage)
         }
     }
 
@@ -538,6 +637,7 @@ final class StatusBarUIManager {
 
     /// Checks if status bar has at least one valid button (for headless mode detection)
     var hasValidStatusBar: Bool {
+        if combinedStatusItem?.button != nil { return true }
         // Check single-profile status items
         for (_, statusItem) in statusItems {
             if statusItem.button != nil {
@@ -575,11 +675,34 @@ final class StatusBarUIManager {
     /// Updates all status bar buttons based on current usage data
     func updateAllButtons(
         usage: ClaudeUsage,
-        apiUsage: APIUsage?
+        apiUsage: APIUsage?,
+        usageAvailable: Bool = true,
+        refreshFailed: Bool = false
     ) {
         // Get config from active profile
         let profile = ProfileManager.shared.activeProfile
-        let config = profile?.iconConfig ?? .default
+        var config = profile?.iconConfig ?? .default
+        if SharedDataStore.shared.loadPopoverShowAllProfiles() {
+            config.showRemainingPercentage = ProfileManager.shared.multiProfileConfig.showRemainingPercentage
+        }
+        let presentation = MenuBarUsagePresentation(usage: usageAvailable ? usage : nil,
+                                                   refreshFailed: refreshFailed,
+                                                   showRemaining: config.showRemainingPercentage)
+        let description = presentation.tooltip(profileName: profile?.name ?? "Usage", showWeek: true, error: nil)
+
+        if !usageAvailable, !config.enabledMetrics.isEmpty {
+            for (metric, item) in statusItems where metric != .api || apiUsage == nil {
+                item.button?.title = ""
+                item.button?.image = NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: "No usage data")
+                item.button?.toolTip = description
+                item.button?.setAccessibilityLabel(description)
+                item.length = Self.multiProfilePlaceholderLength
+            }
+            if apiUsage != nil {
+                updateButton(for: .api, usage: usage, apiUsage: apiUsage)
+            }
+            return
+        }
 
         // Keep the render path aligned with ClaudeAPIService/MenuBarManager auth
         // fallback logic so users authenticated only via `claude login` don't
@@ -619,11 +742,28 @@ final class StatusBarUIManager {
                 colorMode: config.colorMode,
                 singleColorHex: config.singleColorHex,
                 showIconName: config.showIconNames,
-                showNextSessionTime: metricConfig.showNextSessionTime
+                showNextSessionTime: metricConfig.showNextSessionTime && presentation.state == .fresh,
+                readingState: presentation.state
             )
 
-            image.isTemplate = config.colorMode == .monochrome && !config.showPaceMarker
-            button.image = image
+            let unavailable = (metricConfig.metricType == .session && !usage.hasSessionUsage)
+                || (metricConfig.metricType == .week && !usage.hasWeeklyUsage)
+            let result: NSImage
+            if unavailable {
+                result = renderer.createMultiProfilePercentage(
+                    sessionPercentage: nil, weekPercentage: nil, sessionStatus: .safe, weekStatus: .safe,
+                    profileName: config.showIconNames ? metricConfig.metricType.displayName : nil,
+                    monochromeMode: true, isDarkMode: menuBarIsDark, showWeek: false)
+                result.isTemplate = true
+            } else if presentation.state == .lastKnown && metricConfig.metricType != .api {
+                result = renderer.createLastKnownIcon(from: image, isDarkMode: menuBarIsDark)
+            } else {
+                image.isTemplate = config.colorMode == .monochrome && !config.showPaceMarker
+                result = image
+            }
+            button.toolTip = description
+            button.setAccessibilityLabel(description)
+            setButtonImage(button, image: result)
         }
     }
 
@@ -639,7 +779,10 @@ final class StatusBarUIManager {
         }
 
         // Get config from active profile
-        let config = ProfileManager.shared.activeProfile?.iconConfig ?? .default
+        var config = ProfileManager.shared.activeProfile?.iconConfig ?? .default
+        if SharedDataStore.shared.loadPopoverShowAllProfiles() {
+            config.showRemainingPercentage = ProfileManager.shared.multiProfileConfig.showRemainingPercentage
+        }
         guard let metricConfig = config.config(for: metricType) else {
             return
         }
@@ -690,13 +833,18 @@ final class StatusBarUIManager {
         return statusItems[metricType]?.button
     }
 
-    /// Get the first enabled metric's button (for backwards compatibility)
+    /// Finds an actual item, including combined/default and deselected-active cases.
     var primaryButton: NSStatusBarButton? {
-        let config = DataStore.shared.loadMenuBarIconConfiguration()
-        guard let firstMetric = config.enabledMetrics.first else {
-            return nil
+        if let button = combinedStatusItem?.button { return button }
+        let config = ProfileManager.shared.activeProfile?.iconConfig ?? .default
+        for metric in config.enabledMetrics {
+            if let button = statusItems[metric.metricType]?.button { return button }
         }
-        return statusItems[firstMetric.metricType]?.button
+        if let button = statusItems[.session]?.button { return button }
+        for id in multiProfileOrder {
+            if let button = multiProfileStatusItems[id]?.button { return button }
+        }
+        return statusItems.values.compactMap(\.button).first
     }
 
     /// Find which metric type owns the given button (sender)
@@ -742,10 +890,12 @@ final class StatusBarUIManager {
         // Avoid NSImage.tiffRepresentation: macOS 26 SDK crashes in
         // SetupTIFFErrorHandler dispatch_once. Hash via CGImage bytes instead.
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
-              let newData = cg.dataProvider?.data as Data? else {
+              let pixels = cg.dataProvider?.data as Data? else {
             button.image = image
             return
         }
+        var newData = Data("\(cg.width):\(cg.height):\(image.isTemplate):".utf8)
+        newData.append(pixels)
         if lastImageData[buttonId] == newData { return }
         lastImageData[buttonId] = newData
         button.image = image

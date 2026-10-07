@@ -58,8 +58,9 @@ struct PopoverContentView: View {
     @ObservedObject var manager: MenuBarManager
     let onRefresh: () -> Void
     let onPreferences: () -> Void
+    var onContentHeightChanged: ((CGFloat) -> Void)? = nil
 
-    @State private var isRefreshing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showInsights = false
     // Drives a custom entrance animation. The native NSPopover open animation is
     // disabled (see MenuBarManager) because its animated window resize recurses
@@ -68,6 +69,7 @@ struct PopoverContentView: View {
     // the window-resize loop.
     @State private var appeared = false
     @StateObject private var profileManager = ProfileManager.shared
+    @AppStorage("popoverShowAllProfiles") private var showAllProfiles = false
 
     private func profileInitials(for name: String) -> String {
         let words = name.split(separator: " ")
@@ -80,17 +82,20 @@ struct PopoverContentView: View {
     }
 
     // Computed properties for multi-profile mode support
-    private var displayUsage: ClaudeUsage {
-        manager.clickedProfileUsage ?? manager.usage
+    private var displayProfile: Profile? {
+        manager.clickedProfileId.flatMap { id in
+            profileManager.profiles.first(where: { $0.id == id })
+        } ?? profileManager.activeProfile
+    }
+
+    private var displayUsage: ClaudeUsage? {
+        displayProfile?.claudeUsage
     }
 
     private var displayAPIUsage: APIUsage? {
         // When viewing a non-active profile, use only that profile's API data
         // to avoid leaking the active profile's console data
-        if manager.clickedProfileUsage != nil {
-            return manager.clickedProfileAPIUsage
-        }
-        return manager.apiUsage
+        displayProfile?.apiUsage
     }
 
     /// Provider of the profile being viewed (clicked profile in multi-profile
@@ -103,23 +108,34 @@ struct PopoverContentView: View {
     }
 
     var body: some View {
+        Group {
+            if showAllProfiles {
+                CombinedUsageView(
+                    profiles: profileManager.profiles.filter(\.isSelectedForDisplay),
+                    errors: manager.profileRefreshErrors,
+                    isRefreshing: manager.isRefreshing,
+                    refreshingProfileIDs: manager.refreshingProfileIDs,
+                    onRefresh: onRefresh,
+                    onPreferences: onPreferences,
+                    onRefreshProfile: manager.refreshProfile,
+                    onConfigureProfile: manager.configureProfile,
+                    onContentHeightChanged: onContentHeightChanged
+                )
+                .background(VisualEffectBackground())
+            } else {
+                individualProfileContent
+            }
+        }
+        .modifier(UsagePresentationMotion(presentationID: manager.popoverPresentationID))
+    }
+
+    private var individualProfileContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
             SmartHeader(
-                usage: displayUsage,
                 status: manager.status,
-                isRefreshing: isRefreshing,
-                onRefresh: {
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        isRefreshing = true
-                    }
-                    onRefresh()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            isRefreshing = false
-                        }
-                    }
-                },
+                isRefreshing: manager.isRefreshing,
+                onRefresh: onRefresh,
                 onManageProfiles: onPreferences,
                 onPreferences: onPreferences,
                 clickedProfileId: manager.clickedProfileId
@@ -128,23 +144,15 @@ struct PopoverContentView: View {
             PopoverDivider()
 
             // Error / stale data banners
-            if manager.hasCredentialError {
+            if let error = displayProfile.flatMap({ manager.profileRefreshErrors[$0.id] }) {
                 StatusBannerView(
                     icon: "exclamationmark.triangle.fill",
-                    message: "popover.banner.credentials_expired".localized,
+                    message: error,
                     color: .orange
                 ) {
                     onPreferences()
                 }
-            } else if manager.consecutiveRefreshFailures >= 3 {
-                StatusBannerView(
-                    icon: "arrow.clockwise.circle.fill",
-                    message: String(format: "popover.banner.refresh_failed".localized, manager.consecutiveRefreshFailures),
-                    color: .yellow
-                ) {
-                    onRefresh()
-                }
-            } else if let lastRefresh = manager.lastSuccessfulRefreshTime,
+            } else if let lastRefresh = displayUsage?.lastUpdated,
                       Date().timeIntervalSince(lastRefresh) > 300 {
                 let minutesAgo = Int(Date().timeIntervalSince(lastRefresh) / 60)
                 StatusBannerView(
@@ -208,12 +216,26 @@ struct PopoverContentView: View {
             }
 
             // Usage
-            SmartUsageDashboard(usage: displayUsage, apiUsage: displayAPIUsage, provider: displayProvider)
+            if let usage = displayUsage {
+                SmartUsageDashboard(usage: usage, apiUsage: displayAPIUsage, provider: displayProvider,
+                                    readingState: UsageDataState.resolve(lastUpdated: usage.lastUpdated,
+                                        refreshFailed: displayProfile.map { manager.profileRefreshErrors[$0.id] != nil } ?? false))
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("No usage data received", systemImage: "clock.badge.exclamationmark")
+                        .font(.system(size: 13, weight: .medium))
+                    Text(displayProfile.flatMap { manager.profileRefreshErrors[$0.id] }
+                         ?? "Connect this account in Settings, then refresh.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(16)
+            }
 
             // Contextual Insights
-            if showInsights {
+            if showInsights, let usage = displayUsage {
                 PopoverDivider()
-                ContextualInsights(usage: displayUsage)
+                ContextualInsights(usage: usage)
                     .transition(.opacity)
             }
 
@@ -224,9 +246,11 @@ struct PopoverContentView: View {
         .opacity(appeared ? 1 : 0)
         .scaleEffect(appeared ? 1 : 0.96, anchor: .top)
         .onAppear {
-            appeared = false
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+            if reduceMotion {
                 appeared = true
+            } else {
+                appeared = false
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { appeared = true }
             }
         }
     }
@@ -247,6 +271,7 @@ struct ProfileSwitcherCompact: View {
     @StateObject private var profileManager = ProfileManager.shared
     @State private var isHovered = false
     let onManageProfiles: () -> Void
+    var viewedProfileName: String? = nil
 
     var body: some View {
         Menu {
@@ -304,7 +329,7 @@ struct ProfileSwitcherCompact: View {
                 }
             }
         } label: {
-            Text(profileManager.activeProfile?.name ?? "popover.no_profile".localized)
+            Text(viewedProfileName ?? profileManager.activeProfile?.name ?? "popover.no_profile".localized)
                 .font(.system(size: 13, weight: .bold))
                 .foregroundColor(.primary)
                 .lineLimit(1)
@@ -456,7 +481,6 @@ struct ProfileSwitcherBar: View {
 
 // MARK: - Smart Header Component
 struct SmartHeader: View {
-    let usage: ClaudeUsage
     let status: ClaudeStatus
     let isRefreshing: Bool
     let onRefresh: () -> Void
@@ -498,7 +522,7 @@ struct SmartHeader: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                ProfileSwitcherCompact(onManageProfiles: onManageProfiles)
+                ProfileSwitcherCompact(onManageProfiles: onManageProfiles, viewedProfileName: clickedProfile?.name)
 
                 // Status
                 Button(action: {
@@ -552,6 +576,7 @@ struct HeaderIconButton: View {
     let action: () -> Void
 
     @State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
@@ -575,8 +600,10 @@ struct HeaderIconButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(icon == "gearshape.fill" ? "Settings" : "Refresh usage")
+        .disabled(isRefreshing)
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) {
                 isHovered = hovering
             }
         }
@@ -588,12 +615,16 @@ struct SmartUsageDashboard: View {
     let usage: ClaudeUsage
     let apiUsage: APIUsage?
     var provider: Provider = .anthropic
+    var showRemainingOverride: Bool? = nil
+    var readingState: UsageDataState = .fresh
+    var compactLayout: Bool = false
     @StateObject private var profileManager = ProfileManager.shared
     private var capabilities: ProviderCapabilities {
         provider.descriptor.capabilities
     }
 
     private var showRemainingPercentage: Bool {
+        if let showRemainingOverride { return showRemainingOverride }
         if profileManager.displayMode == .multi {
             return profileManager.multiProfileConfig.showRemainingPercentage
         }
@@ -626,25 +657,27 @@ struct SmartUsageDashboard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Primary: Session Usage
-            UsageRow(
-                title: "menubar.session_usage".localized,
-                subtitle: "menubar.5_hour_window".localized,
-                usedPercentage: usage.effectiveSessionPercentage,
-                showRemaining: showRemainingPercentage,
-                resetTime: usage.sessionResetTime,
-                periodDuration: Constants.sessionWindow,
-                showTimeMarker: showTimeMarker,
-                showPaceMarker: showPaceMarker,
-                usePaceColoring: usePaceColoring,
-                timeDisplay: timeDisplay
-            )
+        VStack(alignment: .leading, spacing: compactLayout ? 4 : 6) {
+            // A provider's absent window is not a measured zero or a plan-based assumption.
+            if provider != .codex || usage.hasSessionUsage {
+                UsageRow(
+                    title: "menubar.five_hour_limit".localized,
+                    subtitle: "menubar.5_hour_window".localized,
+                    usedPercentage: readingState == .fresh ? usage.effectiveSessionPercentage : usage.sessionPercentage,
+                    showRemaining: showRemainingPercentage,
+                    resetTime: usage.sessionResetTime,
+                    periodDuration: Constants.sessionWindow,
+                    showTimeMarker: showTimeMarker,
+                    showPaceMarker: showPaceMarker,
+                    usePaceColoring: usePaceColoring,
+                    timeDisplay: timeDisplay,
+                    isAvailable: usage.hasSessionUsage
+                )
+            }
 
             if usage.designWeeklyTokensUsed > 0 {
                 UsageRow(
-                    title: "menubar.design_usage".localized,
-                    tag: "menubar.weekly".localized,
+                    title: "menubar.weekly_model".localized(with: "menubar.design_usage".localized),
                     subtitle: nil,
                     usedPercentage: usage.designWeeklyPercentage,
                     showRemaining: showRemainingPercentage,
@@ -656,8 +689,7 @@ struct SmartUsageDashboard: View {
 
             // All Models (Weekly)
             UsageRow(
-                title: "menubar.all_models".localized,
-                tag: "menubar.weekly".localized,
+                title: provider == .codex ? "menubar.weekly_usage".localized : "menubar.weekly_all_models".localized,
                 subtitle: nil,
                 usedPercentage: usage.weeklyPercentage,
                 showRemaining: showRemainingPercentage,
@@ -666,13 +698,13 @@ struct SmartUsageDashboard: View {
                 showTimeMarker: showTimeMarker,
                 showPaceMarker: showPaceMarker,
                 usePaceColoring: usePaceColoring,
-                timeDisplay: timeDisplay
+                timeDisplay: timeDisplay,
+                isAvailable: usage.hasWeeklyUsage
             )
 
-            if usage.fableWeeklyTokensUsed > 0 {
+            if usage.hasFableUsage {
                 UsageRow(
-                    title: "menubar.fable_usage".localized,
-                    tag: "menubar.weekly".localized,
+                    title: "menubar.weekly_fable".localized,
                     subtitle: nil,
                     usedPercentage: usage.fableWeeklyPercentage,
                     showRemaining: showRemainingPercentage,
@@ -684,8 +716,7 @@ struct SmartUsageDashboard: View {
 
             if usage.opusWeeklyTokensUsed > 0 {
                 UsageRow(
-                    title: "menubar.opus_usage".localized,
-                    tag: "menubar.weekly".localized,
+                    title: "menubar.weekly_model".localized(with: "menubar.opus_usage".localized),
                     subtitle: nil,
                     usedPercentage: usage.opusWeeklyPercentage,
                     showRemaining: showRemainingPercentage,
@@ -696,7 +727,7 @@ struct SmartUsageDashboard: View {
 
             if usage.sonnetWeeklyTokensUsed > 0 {
                 UsageRow(
-                    title: "menubar.sonnet_usage".localized,
+                    title: "menubar.weekly_model".localized(with: "menubar.sonnet_usage".localized),
                     subtitle: nil,
                     usedPercentage: usage.sonnetWeeklyPercentage,
                     showRemaining: showRemainingPercentage,
@@ -732,31 +763,8 @@ struct SmartUsageDashboard: View {
                 }
             }
 
-            // Plan / credits (providers that report them, e.g. Codex)
-            if usage.planType != nil || usage.creditsUnlimited == true || usage.creditsBalance != nil {
-                HStack(spacing: 6) {
-                    if let plan = usage.planType {
-                        Text(plan.replacingOccurrences(of: "_", with: " ").capitalized)
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.accentColor)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(Color.accentColor.opacity(0.12)))
-                    }
-
-                    Spacer()
-
-                    if usage.creditsUnlimited == true {
-                        Text("popover.credits_unlimited".localized)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.adaptiveGreen)
-                    } else if let balance = usage.creditsBalance {
-                        Text("popover.credits_balance".localized(with: String(format: "%.2f", balance)))
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .padding(.top, 2)
+            if !compactLayout {
+                ProviderAccountSummary(usage: usage, provider: provider)
             }
 
             // API Usage (console-billing providers only)
@@ -769,15 +777,36 @@ struct SmartUsageDashboard: View {
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, compactLayout ? 0 : 14)
+        .padding(.vertical, compactLayout ? 0 : 8)
+        .environment(\.usageReadingState, readingState)
+        .environment(\.usageCompactLayout, compactLayout)
     }
 }
 
 // MARK: - Usage Row (flat, native style)
+private struct UsageReadingStateKey: EnvironmentKey {
+    static let defaultValue: UsageDataState = .fresh
+}
+
+private struct UsageCompactLayoutKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var usageReadingState: UsageDataState {
+        get { self[UsageReadingStateKey.self] }
+        set { self[UsageReadingStateKey.self] = newValue }
+    }
+
+    var usageCompactLayout: Bool {
+        get { self[UsageCompactLayoutKey.self] }
+        set { self[UsageCompactLayoutKey.self] = newValue }
+    }
+}
+
 struct UsageRow: View {
     let title: String
-    var tag: String? = nil
     let subtitle: String?
     let usedPercentage: Double
     let showRemaining: Bool
@@ -787,6 +816,11 @@ struct UsageRow: View {
     var showPaceMarker: Bool = true
     var usePaceColoring: Bool = true
     var timeDisplay: PopoverTimeDisplay = .resetTime
+    var isAvailable: Bool = true
+    @Environment(\.usageReadingState) private var readingState
+    @Environment(\.usageCompactLayout) private var compactLayout
+
+    private var hasReading: Bool { isAvailable && usedPercentage.isFinite && usedPercentage >= 0 }
 
     private var displayPercentage: Double {
         UsageStatusCalculator.getDisplayPercentage(
@@ -804,12 +838,12 @@ struct UsageRow: View {
     }
 
     private var timeMarkerFraction: CGFloat? {
-        guard showTimeMarker, let f = rawElapsedFraction else { return nil }
+        guard readingState == .fresh, showTimeMarker, let f = rawElapsedFraction else { return nil }
         return CGFloat(showRemaining ? 1.0 - f : f)
     }
 
     private var paceStatus: PaceStatus? {
-        guard showPaceMarker, let elapsed = rawElapsedFraction else { return nil }
+        guard readingState == .fresh, showPaceMarker, let elapsed = rawElapsedFraction else { return nil }
         return PaceStatus.calculate(usedPercentage: usedPercentage, elapsedFraction: elapsed)
     }
 
@@ -829,6 +863,7 @@ struct UsageRow: View {
     }
 
     private var statusColor: Color {
+        guard readingState == .fresh, hasReading else { return .secondary }
         switch statusLevel {
         case .safe: return .adaptiveGreen
         case .moderate: return .orange
@@ -839,78 +874,82 @@ struct UsageRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             // Title row with percentage
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: compactLayout ? .center : .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 5) {
-                        Text(title)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.primary)
+                    Text(title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.primary)
 
-                        if let tag = tag {
-                            Text(tag)
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundColor(.secondary)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1)
-                                .background(
-                                    Capsule()
-                                        .fill(Color.primary.opacity(0.08))
-                                )
-                        }
+                    if let subtitle = subtitle, !compactLayout || periodDuration == nil {
+                        Text(subtitle)
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
                     }
 
-                    if let subtitle = subtitle {
-                        Text(subtitle)
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                    if compactLayout {
+                        if !hasReading {
+                            Text("No quota reported")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        } else if let reset = resetTime {
+                            Text(resetTimeText(for: reset))
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
                 Spacer()
 
-                Text("\(Int(displayPercentage))%")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                UsagePercentageText(percentage: hasReading ? displayPercentage : nil)
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
                     .foregroundColor(statusColor)
             }
 
             // Progress bar
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2.5)
-                        .fill(Color.primary.opacity(0.08))
-
-                    RoundedRectangle(cornerRadius: 2.5)
-                        .fill(statusColor)
-                        .frame(width: geometry.size.width * min(displayPercentage / 100.0, 1.0))
-                        .animation(.easeInOut(duration: 0.6), value: displayPercentage)
-                }
-                .overlay(alignment: .leading) {
-                    if let fraction = timeMarkerFraction {
-                        RoundedRectangle(cornerRadius: 1)
-                            .fill(timeMarkerColor)
-                            .frame(width: 2.5, height: 8)
-                            .offset(x: round(geometry.size.width * fraction) - 0.75)
-                    }
-                }
+            if hasReading {
+                UsageProgressBar(percentage: displayPercentage, color: statusColor,
+                                 markerFraction: timeMarkerFraction, markerColor: timeMarkerColor)
+            } else if !compactLayout {
+                Text("No quota reported")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
-            .frame(height: 4)
 
             // Reset time
-            if let reset = resetTime {
+            if !compactLayout, hasReading, let reset = resetTime {
                 Text(resetTimeText(for: reset))
-                    .font(.system(size: 9))
+                    .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
-        )
+        .padding(.horizontal, compactLayout ? 0 : 10)
+        .padding(.vertical, compactLayout ? 3 : 8)
+        .background {
+            if !compactLayout {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityDescription)
+    }
+
+    private var accessibilityDescription: String {
+        var parts = [title]
+        if let subtitle { parts.append(subtitle) }
+        if hasReading {
+            parts.append("\(MenuBarUsagePresentation.percentageText(displayPercentage)) \(showRemaining ? "remaining" : "used")")
+            if readingState != .fresh { parts.append("last known reading") }
+            if let reset = resetTime { parts.append(resetTimeText(for: reset)) }
+        } else {
+            parts.append("No quota reported")
+        }
+        return parts.joined(separator: ", ")
     }
 
     private func resetTimeText(for reset: Date) -> String {
+        if readingState != .fresh, reset < Date() { return "Reported reset: \(reset.resetTimeString())" }
         switch timeDisplay {
         case .resetTime:
             return "menubar.resets_time".localized(with: reset.resetTimeString())
@@ -1369,24 +1408,13 @@ struct APIUsageCard: View {
 
                 Spacer()
 
-                Text("\(Int(displayPercentage))%")
+                UsagePercentageText(percentage: displayPercentage)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundColor(usageColor)
             }
 
             // Progress bar
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2.5)
-                        .fill(Color.primary.opacity(0.08))
-
-                    RoundedRectangle(cornerRadius: 2.5)
-                        .fill(usageColor)
-                        .frame(width: geometry.size.width * min(displayPercentage / 100.0, 1.0))
-                        .animation(.easeInOut(duration: 0.6), value: displayPercentage)
-                }
-            }
-            .frame(height: 4)
+            UsageProgressBar(percentage: displayPercentage, color: usageColor)
 
             // Used / Remaining
             HStack {

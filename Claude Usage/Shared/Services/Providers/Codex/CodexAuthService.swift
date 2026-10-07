@@ -4,10 +4,11 @@
 //
 //  Created by Claude Code on 2026-07-15.
 //
-//  Reads (and refreshes) the OpenAI Codex CLI's OAuth credentials from
-//  `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`). Parsing, refresh, and
-//  write-back behavior mirrors the Codex CLI itself, as implemented by the
-//  MIT-licensed CodexBar project (github.com/steipete/codexbar).
+//  Reads the OpenAI Codex CLI's OAuth credentials from `~/.codex/auth.json`
+//  (or `$CODEX_HOME/auth.json`) without refreshing or writing that shared file.
+//  Manually pasted profile credentials retain their own refresh flow.
+//  Parsing and manual refresh are based on the MIT-licensed CodexBar project
+//  (github.com/steipete/codexbar).
 //
 
 import Foundation
@@ -61,14 +62,30 @@ struct CodexCredentials {
 final class CodexAuthService {
     static let shared = CodexAuthService()
 
-    private init() {}
+    private let authFileURLOverride: URL?
+    private let session: URLSession
+    private let profileContext: @MainActor () -> [Profile]
+    private let saveProfile: @MainActor (Profile) -> Bool
+
+    init(authFileURL: URL? = nil, session: URLSession = .shared,
+         profileContext: @escaping @MainActor () -> [Profile] = { ProfileManager.shared.profiles },
+         saveProfile: @escaping @MainActor (Profile) -> Bool = {
+             ProfileManager.shared.updateProfile($0)
+             return ProfileStore.shared.lastPersistenceError == nil
+         }) {
+        authFileURLOverride = authFileURL
+        self.session = session
+        self.profileContext = profileContext
+        self.saveProfile = saveProfile
+    }
 
     // MARK: - auth.json location
 
     /// `$CODEX_HOME/auth.json` when CODEX_HOME is set and non-empty,
     /// otherwise `~/.codex/auth.json`.
     func authFileURL(env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
-        codexHomeURL(env: env).appendingPathComponent("auth.json")
+        if let authFileURLOverride { return authFileURLOverride }
+        return codexHomeURL(env: env).appendingPathComponent("auth.json")
     }
 
     func codexHomeURL(env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
@@ -156,25 +173,27 @@ final class CodexAuthService {
 
     // MARK: - Refresh
 
-    /// Refreshes credentials when stale (or when `force` is set, e.g. after a
-    /// 401). Refreshed tokens are persisted: back to auth.json for file-based
-    /// profiles (the Codex CLI rotates refresh tokens — keeping a rotated
-    /// token only in memory could strand the CLI with a revoked one), or back
-    /// to the profile's keychain field for manually pasted credentials.
+    /// File-backed profiles always reload Codex's current credentials. Codex
+    /// alone owns rotation and writes to its shared auth.json, including after
+    /// a 401. Manual profiles refresh when stale or forced and persist to the
+    /// profile's secure storage.
     func refreshIfNeeded(
         _ credentials: CodexCredentials,
         for profile: Profile,
         force: Bool = false
     ) async throws -> CodexCredentials {
+        guard profile.codexCredentialsJSON != nil else {
+            return try loadFromAuthFile()
+        }
         guard (credentials.needsRefresh || force), !credentials.refreshToken.isEmpty else {
             return credentials
         }
 
         // Serialize refreshes per refresh token: OpenAI treats a second POST
         // with the same rotated refresh token as reuse and revokes the whole
-        // token family — which would log out the user's Codex CLI. Concurrent
-        // callers (background refresh + Test Connection, or two profiles
-        // sharing auth.json) join the same in-flight task instead.
+        // token family. Concurrent manual-profile callers (background refresh
+        // + Test Connection, or two profiles using the same pasted credentials)
+        // join the same in-flight task instead.
         let refreshTask: Task<CodexCredentials, Error> = await MainActor.run {
             if let existing = inflightRefreshes[credentials.refreshToken] {
                 return existing
@@ -186,14 +205,19 @@ final class CodexAuthService {
                     }
                 }
                 let refreshed = try await self.refresh(credentials)
-                self.persistRefreshed(refreshed, for: profile)
                 return refreshed
             }
             inflightRefreshes[credentials.refreshToken] = task
             return task
         }
 
-        return try await refreshTask.value
+        let refreshed = try await refreshTask.value
+        // Coalesce the network operation, not its profile commit. Each joined
+        // caller must receive the rotated lineage in its own secure snapshot.
+        try await MainActor.run {
+            try self.persistRefreshed(refreshed, for: profile)
+        }
+        return refreshed
     }
 
     /// In-flight refresh tasks keyed by the refresh token being rotated.
@@ -217,7 +241,7 @@ final class CodexAuthService {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let startTime = Date()
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         let statusCode = (response as? HTTPURLResponse)?.statusCode
         NetworkLoggerService.shared.logRequest(
             url: Constants.APIEndpoints.codexTokenRefresh,
@@ -288,62 +312,42 @@ final class CodexAuthService {
 
     // MARK: - Persisting refreshed tokens
 
-    private func persistRefreshed(_ credentials: CodexCredentials, for profile: Profile) {
-        if profile.codexCredentialsJSON != nil {
-            // Manual-paste profile: persist to the profile's keychain field.
-            // Serialization failure must NOT nil out the stored credentials,
-            // and the write must patch the CURRENT profile (looked up by id
-            // on the main actor) — `profile` is a value-type snapshot taken
-            // before the network refresh, and writing it back wholesale would
-            // clobber any name/settings edits made while the refresh was in
-            // flight.
-            guard let serialized = Self.serializeAuthJSON(credentials, mergingInto: profile.codexCredentialsJSON) else {
-                LoggingService.shared.logError("Codex: failed to serialize refreshed tokens; keeping stored credentials")
-                return
-            }
-            let profileId = profile.id
-            Task { @MainActor in
-                guard var current = ProfileManager.shared.profiles.first(where: { $0.id == profileId }) else { return }
-                current.codexCredentialsJSON = serialized
-                ProfileManager.shared.updateProfile(current)
-            }
-        } else {
-            // File-based profile: write back to auth.json like the Codex CLI does.
-            do {
-                try writeBackToAuthFile(credentials)
-            } catch {
-                LoggingService.shared.logError("Codex: failed to write refreshed tokens to auth.json (non-fatal)", error: error)
-            }
+    @MainActor private func persistRefreshed(_ credentials: CodexCredentials, for profile: Profile) throws {
+        guard profile.codexCredentialsJSON != nil else { return }
+        guard var current = profileContext().first(where: { $0.id == profile.id }),
+              current.provider == .codex, let currentJSON = current.codexCredentialsJSON else {
+            throw changedManualProfileError()
+        }
+        guard currentJSON == profile.codexCredentialsJSON else {
+            // Two callers can join a refresh for the same profile. The first
+            // commit already stored this exact result; the second is a no-op.
+            if let stored = Self.parse(Data(currentJSON.utf8)),
+               stored.accessToken == credentials.accessToken,
+               stored.refreshToken == credentials.refreshToken,
+               stored.resolvedAccountId == credentials.resolvedAccountId { return }
+            // A login/source replacement while awaiting the network is newer
+            // than this result and must remain intact.
+            throw changedManualProfileError()
+        }
+        guard let serialized = Self.serializeAuthJSON(credentials, mergingInto: currentJSON) else {
+            throw AppError(code: .storageEncodingFailed,
+                           message: "The refreshed Codex credentials could not be encoded.",
+                           isRecoverable: true)
+        }
+        current.codexCredentialsJSON = serialized
+        guard saveProfile(current) else {
+            throw AppError(code: .storageWriteFailed,
+                           message: "The refreshed Codex credentials could not be saved securely.",
+                           isRecoverable: true,
+                           recoverySuggestion: "Resolve the storage error, then reconnect this manual Codex account.")
         }
     }
 
-    /// Atomic write-back preserving unknown top-level keys: stage to a
-    /// same-directory temp file with 0600 permissions, then rename over
-    /// auth.json (matching the Codex CLI / CodexBar discipline).
-    func writeBackToAuthFile(_ credentials: CodexCredentials) throws {
-        let url = authFileURL()
-        let existingData = try? Data(contentsOf: url)
-        guard let serialized = Self.serializeAuthJSON(credentials, mergingInto: existingData.flatMap { String(data: $0, encoding: .utf8) }) else {
-            throw AppError(code: .storageEncodingFailed, message: "Failed to serialize Codex credentials", isRecoverable: false)
-        }
-        let data = Data(serialized.utf8)
-
-        let stagedURL = url.deletingLastPathComponent()
-            .appendingPathComponent(".auth.json.claude-usage-staged-\(UUID().uuidString)")
-        FileManager.default.createFile(
-            atPath: stagedURL.path,
-            contents: data,
-            attributes: [.posixPermissions: 0o600]
-        )
-        do {
-            let result = rename(stagedURL.path, url.path)
-            guard result == 0 else {
-                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [NSFilePathErrorKey: url.path])
-            }
-        } catch {
-            try? FileManager.default.removeItem(at: stagedURL)
-            throw error
-        }
+    private func changedManualProfileError() -> AppError {
+        AppError(code: .providerCredentialsNotFound,
+                 message: "The Codex credential source changed while it was being refreshed.",
+                 isRecoverable: true,
+                 recoverySuggestion: "Test the current Codex connection again.")
     }
 
     /// Serializes credentials into auth.json shape, merging into existing JSON

@@ -8,6 +8,7 @@
 import Foundation
 
 extension Notification.Name {
+    static let settingsSectionRequested = Notification.Name("settingsSectionRequested")
     /// Posted when the menu bar icon configuration changes (metrics enabled/disabled, order, styling, etc.)
     static let menuBarIconConfigChanged = Notification.Name("menuBarIconConfigChanged")
 

@@ -148,13 +148,13 @@ struct AboutView: View {
 
                     VStack(spacing: DesignTokens.Spacing.small) {
                         LinkButton(title: "about.star_github".localized, icon: "star.fill") {
-                            if let url = URL(string: "https://github.com/hamed-elfayome/Claude-Usage-Tracker") {
+                            if let url = URL(string: Constants.GitHub.repoURL) {
                                 NSWorkspace.shared.open(url)
                             }
                         }
 
                         LinkButton(title: "about.report_issue".localized, icon: "exclamationmark.triangle") {
-                            if let url = URL(string: "https://github.com/hamed-elfayome/Claude-Usage-Tracker/issues") {
+                            if let url = URL(string: Constants.GitHub.repoURL + "/issues") {
                                 NSWorkspace.shared.open(url)
                             }
                         }

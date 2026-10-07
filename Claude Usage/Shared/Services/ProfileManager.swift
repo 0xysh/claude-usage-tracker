@@ -21,20 +21,39 @@ class ProfileManager: ObservableObject {
     private let profileStore = ProfileStore.shared
     private let cliSyncService = ClaudeCodeSyncService.shared
 
+    @Published private(set) var persistenceError: SecureProfilePersistenceError?
     private var switchingSemaphore = false
+    private var persistenceObserver: NSObjectProtocol?
 
-    private init() {}
+    private init() {
+        // Direct service writes also use ProfileStore, so their failures enter
+        // the same visible error path without exposing any credential payload.
+        persistenceObserver = NotificationCenter.default.addObserver(
+            forName: ProfileStore.persistenceStatusChanged, object: profileStore, queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.reportPersistenceStatus(self.profileStore.lastPersistenceError)
+            }
+        }
+    }
 
     // MARK: - Initialization
 
     func loadProfiles() {
         profiles = profileStore.loadProfiles()
+        if let error = profileStore.lastPersistenceError {
+            reportPersistenceStatus(error)
+            // An unreadable saved document must not become a new empty/default
+            // profile set. A failed migration still supplies hydrated profiles.
+            if profiles.isEmpty { return }
+        }
 
         // Ensure minimum 1 profile
         if profiles.isEmpty {
             let defaultProfile = createDefaultProfile()
             profiles = [defaultProfile]
-            profileStore.saveProfiles(profiles)
+            guard persistProfiles() else { activeProfile = defaultProfile; return }
 
             // On first launch, try to sync CLI credentials to the new default profile
             syncCLICredentialsToDefaultProfile(defaultProfile.id)
@@ -46,7 +65,7 @@ class ProfileManager: ObservableObject {
             activeProfile = profile
         } else {
             activeProfile = profiles.first
-            if let first = profiles.first {
+            if let first = profiles.first, profileStore.lastPersistenceError == nil {
                 profileStore.saveActiveProfileId(first.id)
             }
         }
@@ -86,9 +105,9 @@ class ProfileManager: ObservableObject {
         )
 
         profiles.append(newProfile)
-        profileStore.saveProfiles(profiles)
-
-        LoggingService.shared.log("Created new profile: \(newProfile.name)")
+        if persistProfiles() {
+            LoggingService.shared.log("Created new profile: \(newProfile.name)")
+        }
         return newProfile
     }
 
@@ -110,7 +129,7 @@ class ProfileManager: ObservableObject {
                 LoggingService.shared.log("Updated profile: \(profile.name) (not active)")
             }
 
-            profileStore.saveProfiles(profiles)
+            persistProfiles()
         }
     }
 
@@ -119,34 +138,23 @@ class ProfileManager: ObservableObject {
             throw ProfileError.cannotDeleteLastProfile
         }
 
-        let profileName = profiles.first(where: { $0.id == id })?.name ?? "unknown"
-
-        // Remove the profile's terminal launcher script, if any (the launcher's
-        // config dir and login are left in place — see TerminalLauncherService).
-        if let profile = profiles.first(where: { $0.id == id }) {
-            TerminalLauncherService.shared.uninstall(profile)
-        }
-
-        // Clean up usage history for this profile
-        UsageHistoryService.shared.deleteHistory(for: id)
-        LoggingService.shared.log("Successfully deleted usage history for profile: \(profileName)")
-
+        let removed = profiles.first(where: { $0.id == id })
+        let profileName = removed?.name ?? "unknown"
+        let wasActive = activeProfile?.id == id
         profiles.removeAll { $0.id == id }
-
-        // Remove the profile's credentials from the Keychain (they no longer live
-        // in the profiles plist — #267).
-        profileStore.deleteProfileSecrets(id)
-
-        // Switch to first profile if deleted active
-        if activeProfile?.id == id {
-            if let first = profiles.first {
-                Task {
-                    await activateProfile(first.id)
-                }
-            }
+        guard persistProfiles() else {
+            if wasActive { activeProfile = profiles.first }
+            throw profileStore.lastPersistenceError ?? SecureProfilePersistenceError.secureWriteFailed
         }
 
-        profileStore.saveProfiles(profiles)
+        // Destructive cleanup follows the durable profile commit. Failed edits
+        // stay in memory while the previous secrets and history remain intact.
+        if let removed { TerminalLauncherService.shared.uninstall(removed) }
+        UsageHistoryService.shared.deleteHistory(for: id)
+        profileStore.deleteProfileSecrets(id)
+        if wasActive, let first = profiles.first {
+            Task { await activateProfile(first.id) }
+        }
         LoggingService.shared.log("Deleted profile: \(profileName)")
     }
 
@@ -156,7 +164,7 @@ class ProfileManager: ObservableObject {
             guard let self = self else { return }
             if let index = self.profiles.firstIndex(where: { $0.id == id }) {
                 self.profiles[index].isSelectedForDisplay.toggle()
-                self.profileStore.saveProfiles(self.profiles)
+                self.persistProfiles()
             }
         }
     }
@@ -262,17 +270,25 @@ class ProfileManager: ObservableObject {
             LoggingService.shared.log("⚠️ Profile '\(updatedProfile.name)' has no CLI credentials JSON")
         }
 
-        // Update last used timestamp
-        var updated = updatedProfile
-        updated.lastUsedAt = Date()
-
-        if let index = profiles.firstIndex(where: { $0.id == updatedProfile.id }) {
-            profiles[index] = updated
+        // The refresh above can persist rotated credentials and reload profiles.
+        // Commit the latest target instead of restoring its pre-refresh snapshot.
+        guard let index = profiles.firstIndex(where: { $0.id == id }) else {
+            LoggingService.shared.log("Profile no longer exists after credential refresh: \(id)")
+            switchingSemaphore = false
+            isSwitchingProfile = false
+            return
         }
+        var updated = profiles[index]
+        updated.lastUsedAt = Date()
+        profiles[index] = updated
 
         activeProfile = updated
+        guard persistProfiles() else {
+            switchingSemaphore = false
+            isSwitchingProfile = false
+            return
+        }
         profileStore.saveActiveProfileId(id)
-        profileStore.saveProfiles(profiles)
 
         // Update statusline script if the new profile has credentials
         // (statusline is Claude Code infrastructure — capability-gated)
@@ -296,7 +312,7 @@ class ProfileManager: ObservableObject {
         switchingSemaphore = false
         isSwitchingProfile = false
 
-        LoggingService.shared.log("Successfully activated profile: \(updatedProfile.name)")
+        LoggingService.shared.log("Successfully activated profile: \(updated.name)")
     }
 
     // MARK: - Credentials
@@ -306,8 +322,9 @@ class ProfileManager: ObservableObject {
     }
 
     func saveCredentials(for profileId: UUID, credentials: ProfileCredentials) throws {
-        try profileStore.saveProfileCredentials(profileId, credentials: credentials)
-
+        guard profiles.contains(where: { $0.id == profileId }) else { throw ProfileError.profileNotFound }
+        // Retain the attempted credentials in memory even if secure persistence
+        // fails; the caller receives an error instead of a false save success.
         // Update profile in memory
         if let index = profiles.firstIndex(where: { $0.id == profileId }) {
             profiles[index].claudeSessionKey = credentials.claudeSessionKey
@@ -320,16 +337,14 @@ class ProfileManager: ObservableObject {
                 activeProfile = profiles[index]
             }
         }
+        guard persistProfiles() else {
+            throw profileStore.lastPersistenceError ?? SecureProfilePersistenceError.secureWriteFailed
+        }
     }
 
     /// Removes Claude.ai credentials for a profile
     func removeClaudeAICredentials(for profileId: UUID) throws {
-        // Load and clear credentials from Keychain
-        var creds = try profileStore.loadProfileCredentials(profileId)
-        creds.claudeSessionKey = nil
-        creds.organizationId = nil
-        try profileStore.saveProfileCredentials(profileId, credentials: creds)
-
+        guard profiles.contains(where: { $0.id == profileId }) else { throw ProfileError.profileNotFound }
         // Update Profile model in memory
         if let index = profiles.firstIndex(where: { $0.id == profileId }) {
             profiles[index].claudeSessionKey = nil
@@ -340,7 +355,9 @@ class ProfileManager: ObservableObject {
                 activeProfile = profiles[index]
             }
 
-            profileStore.saveProfiles(profiles)
+            guard persistProfiles() else {
+                throw profileStore.lastPersistenceError ?? SecureProfilePersistenceError.secureWriteFailed
+            }
         }
 
         LoggingService.shared.log("ProfileManager: Removed Claude.ai credentials for profile \(profileId)")
@@ -351,12 +368,7 @@ class ProfileManager: ObservableObject {
 
     /// Removes API Console credentials for a profile
     func removeAPICredentials(for profileId: UUID) throws {
-        // Load and clear credentials from Keychain
-        var creds = try profileStore.loadProfileCredentials(profileId)
-        creds.apiSessionKey = nil
-        creds.apiOrganizationId = nil
-        try profileStore.saveProfileCredentials(profileId, credentials: creds)
-
+        guard profiles.contains(where: { $0.id == profileId }) else { throw ProfileError.profileNotFound }
         // Update Profile model in memory
         if let index = profiles.firstIndex(where: { $0.id == profileId }) {
             profiles[index].apiSessionKey = nil
@@ -367,7 +379,9 @@ class ProfileManager: ObservableObject {
                 activeProfile = profiles[index]
             }
 
-            profileStore.saveProfiles(profiles)
+            guard persistProfiles() else {
+                throw profileStore.lastPersistenceError ?? SecureProfilePersistenceError.secureWriteFailed
+            }
         }
 
         LoggingService.shared.log("ProfileManager: Removed API credentials for profile \(profileId)")
@@ -393,7 +407,7 @@ class ProfileManager: ObservableObject {
         }
 
         // Save to persistent storage
-        profileStore.saveProfiles(profiles)
+        guard persistProfiles() else { return }
         LoggingService.shared.log("Saved Claude usage for profile: \(profiles[index].name)")
     }
 
@@ -417,7 +431,7 @@ class ProfileManager: ObservableObject {
         }
 
         // Save to persistent storage
-        profileStore.saveProfiles(profiles)
+        guard persistProfiles() else { return }
         LoggingService.shared.log("Saved API usage for profile: \(profiles[index].name)")
     }
 
@@ -437,7 +451,7 @@ class ProfileManager: ObservableObject {
                 activeProfile = profiles[index]
             }
 
-            profileStore.saveProfiles(profiles)
+            persistProfiles()
         }
     }
 
@@ -450,7 +464,7 @@ class ProfileManager: ObservableObject {
                 activeProfile = profiles[index]
             }
 
-            profileStore.saveProfiles(profiles)
+            persistProfiles()
         }
     }
 
@@ -463,7 +477,7 @@ class ProfileManager: ObservableObject {
                 activeProfile = profiles[index]
             }
 
-            profileStore.saveProfiles(profiles)
+            persistProfiles()
         }
     }
 
@@ -476,7 +490,7 @@ class ProfileManager: ObservableObject {
                 activeProfile = profiles[index]
             }
 
-            profileStore.saveProfiles(profiles)
+            persistProfiles()
         }
     }
 
@@ -489,7 +503,7 @@ class ProfileManager: ObservableObject {
                 activeProfile = profiles[index]
             }
 
-            profileStore.saveProfiles(profiles)
+            persistProfiles()
         }
     }
 
@@ -502,7 +516,7 @@ class ProfileManager: ObservableObject {
                 activeProfile = profiles[index]
             }
 
-            profileStore.saveProfiles(profiles)
+            persistProfiles()
         }
     }
 
@@ -515,11 +529,30 @@ class ProfileManager: ObservableObject {
                 activeProfile = profiles[index]
             }
 
-            profileStore.saveProfiles(profiles)
+            persistProfiles()
         }
     }
 
     // MARK: - Private Helpers
+
+    @discardableResult
+    private func persistProfiles() -> Bool {
+        let saved = profileStore.saveProfiles(profiles)
+        reportPersistenceStatus(profileStore.lastPersistenceError)
+        return saved
+    }
+
+    private func reportPersistenceStatus(_ error: SecureProfilePersistenceError?) {
+        guard persistenceError != error else { return }
+        persistenceError = error
+        guard let error else { return }
+        let isReadFailure = error == .secureReadFailed || error == .invalidDocument
+        ErrorPresenter.shared.showAlert(for: AppError(
+            code: isReadFailure ? .storageReadFailed : .storageWriteFailed,
+            message: error.errorDescription ?? "Profile storage failed",
+            recoverySuggestion: "Keep the app open to retain unsaved edits. Allow this signed app to use Keychain, then retry the edit. Do not remove existing profile data."
+        ))
+    }
 
     /// Syncs CLI credentials to default profile on first launch only
     private func syncCLICredentialsToDefaultProfile(_ profileId: UUID) {
@@ -574,11 +607,14 @@ class ProfileManager: ObservableObject {
 
 enum ProfileError: LocalizedError {
     case cannotDeleteLastProfile
+    case profileNotFound
 
     var errorDescription: String? {
         switch self {
         case .cannotDeleteLastProfile:
             return "Cannot delete the last profile. At least one profile is required."
+        case .profileNotFound:
+            return "Profile not found."
         }
     }
 }

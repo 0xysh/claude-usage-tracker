@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct PopoverSettingsView: View {
+    @State private var showAllProfiles = SharedDataStore.shared.loadPopoverShowAllProfiles()
     @State private var timeDisplay: PopoverTimeDisplay = SharedDataStore.shared.loadPopoverTimeDisplay()
     @State private var timeFormat: TimeFormatPreference = SharedDataStore.shared.loadTimeFormatPreference()
 
@@ -18,6 +19,14 @@ struct PopoverSettingsView: View {
                     title: "popover.title".localized,
                     subtitle: "popover.subtitle".localized
                 )
+
+                SettingsSectionCard(title: "Combined view", subtitle: "Claude and Codex in one menu-bar item and one window") {
+                    SettingToggle(
+                        title: "Show accounts together",
+                        description: "Show selected profiles in one menu-bar item and one window. Choose profiles in Manage Profiles.",
+                        isOn: $showAllProfiles
+                    )
+                }
 
                 SettingsSectionCard(title: "popover.time_display".localized, subtitle: "popover.time_display_desc".localized) {
                     Picker("", selection: $timeDisplay) {
@@ -40,6 +49,10 @@ struct PopoverSettingsView: View {
                 }
             }
             .padding()
+        }
+        .onChange(of: showAllProfiles) { _, newValue in
+            SharedDataStore.shared.savePopoverShowAllProfiles(newValue)
+            NotificationCenter.default.post(name: .multiProfileConfigChanged, object: nil)
         }
         .onChange(of: timeDisplay) { _, newValue in
             SharedDataStore.shared.savePopoverTimeDisplay(newValue)

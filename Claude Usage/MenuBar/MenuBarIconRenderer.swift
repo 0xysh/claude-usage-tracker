@@ -23,7 +23,8 @@ final class MenuBarIconRenderer {
         colorMode: MenuBarColorMode,
         singleColorHex: String,
         showIconName: Bool,
-        showNextSessionTime: Bool
+        showNextSessionTime: Bool,
+        readingState: UsageDataState = .fresh
     ) -> NSImage {
         // Get the metric value and percentage
         let metricData = getMetricData(
@@ -32,11 +33,12 @@ final class MenuBarIconRenderer {
             usage: usage,
             apiUsage: apiUsage,
             showRemaining: globalConfig.showRemainingPercentage,
-            usePaceColoring: globalConfig.usePaceColoring
+            usePaceColoring: globalConfig.usePaceColoring && readingState == .fresh,
+            readingState: readingState
         )
 
         // Calculate time marker fraction for session/week metrics
-        let timeMarkerFraction: CGFloat? = globalConfig.showTimeMarker
+        let timeMarkerFraction: CGFloat? = globalConfig.showTimeMarker && readingState == .fresh
             ? calculateTimeMarkerFraction(
                 metricType: metricType,
                 usage: usage,
@@ -46,7 +48,7 @@ final class MenuBarIconRenderer {
 
         // Compute pace status from RAW values (not display-adjusted)
         let paceStatus: PaceStatus? = {
-            guard globalConfig.showPaceMarker, metricType != .api else { return nil }
+            guard readingState == .fresh, globalConfig.showPaceMarker, metricType != .api else { return nil }
             // Get raw elapsed fraction (always non-inverted)
             guard let rawElapsed = calculateTimeMarkerFraction(
                 metricType: metricType, usage: usage, showRemaining: false
@@ -155,11 +157,12 @@ final class MenuBarIconRenderer {
         usage: ClaudeUsage,
         apiUsage: APIUsage?,
         showRemaining: Bool,
-        usePaceColoring: Bool = true
+        usePaceColoring: Bool = true,
+        readingState: UsageDataState = .fresh
     ) -> MetricData {
         switch metricType {
         case .session:
-            let usedPercentage = usage.effectiveSessionPercentage
+            let usedPercentage = readingState == .fresh ? usage.effectiveSessionPercentage : usage.sessionPercentage
             let displayPercentage = UsageStatusCalculator.getDisplayPercentage(
                 usedPercentage: usedPercentage,
                 showRemaining: showRemaining
@@ -179,7 +182,7 @@ final class MenuBarIconRenderer {
 
             return MetricData(
                 percentage: displayPercentage,
-                displayText: "\(Int(displayPercentage))%",
+                displayText: MenuBarUsagePresentation.percentageText(displayPercentage),
                 statusLevel: statusLevel,
                 sessionResetTime: usage.sessionResetTime
             )
@@ -205,14 +208,14 @@ final class MenuBarIconRenderer {
 
             let displayText: String
             if config.weekDisplayMode == .percentage {
-                displayText = "\(Int(displayPercentage))%"
+                displayText = MenuBarUsagePresentation.percentageText(displayPercentage)
             } else if usage.weeklyLimit > 0 {
                 // Token display mode - smart formatting
                 displayText = formatTokenCount(usage.weeklyTokensUsed, usage.weeklyLimit)
             } else {
                 // Percentage-only providers (e.g. Codex) report no token limit —
                 // falling through to formatTokenCount would render "0/0".
-                displayText = "\(Int(displayPercentage))%"
+                displayText = MenuBarUsagePresentation.percentageText(displayPercentage)
             }
 
             return MetricData(
@@ -359,7 +362,7 @@ final class MenuBarIconRenderer {
             text = (metricType == .session ? "Session" : "Week") as NSString
         } else {
             // No label mode - show percentage instead
-            text = "\(Int(metricData.percentage))%" as NSString
+            text = MenuBarUsagePresentation.percentageText(metricData.percentage) as NSString
         }
 
         let textSize = text.size(withAttributes: textAttributes)
@@ -1230,9 +1233,9 @@ final class MenuBarIconRenderer {
     // MARK: - Multi-Profile Percentage Style
 
     /// Creates a percentage text icon for multi-profile mode
-    /// Format: "30 · 4" (session · week) with status colors, optional profile label below
+    /// Explicit percentages and stable identity, including absent provider windows.
     func createMultiProfilePercentage(
-        sessionPercentage: Double,
+        sessionPercentage: Double?,
         weekPercentage: Double?,
         sessionStatus: UsageStatusLevel,
         weekStatus: UsageStatusLevel,
@@ -1242,7 +1245,8 @@ final class MenuBarIconRenderer {
         useSystemColor: Bool = false,
         sessionPaceStatus: PaceStatus? = nil,
         weekPaceStatus: PaceStatus? = nil,
-        showPaceMarker: Bool = false
+        showPaceMarker: Bool = false,
+        showWeek: Bool? = nil
     ) -> NSImage {
         let font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .semibold)
         let foregroundColor = menuBarForegroundColor(isDarkMode: isDarkMode)
@@ -1255,19 +1259,19 @@ final class MenuBarIconRenderer {
         let attributed = NSMutableAttributedString()
 
         // Session number
-        let sessionText = "\(Int(sessionPercentage))"
+        let sessionText = MenuBarUsagePresentation.percentageText(sessionPercentage)
         attributed.append(NSAttributedString(string: sessionText, attributes: [
             .font: font,
             .foregroundColor: sessionColor
         ]))
 
         // Separator and week number (if shown)
-        if let weekPct = weekPercentage {
+        if showWeek ?? (weekPercentage != nil) {
             attributed.append(NSAttributedString(string: " · ", attributes: [
                 .font: font,
                 .foregroundColor: separatorColor
             ]))
-            let weekText = "\(Int(weekPct))"
+            let weekText = MenuBarUsagePresentation.percentageText(weekPercentage)
             attributed.append(NSAttributedString(string: weekText, attributes: [
                 .font: font,
                 .foregroundColor: weekColor
@@ -1279,7 +1283,13 @@ final class MenuBarIconRenderer {
         let paceDotExtra: CGFloat = hasPaceDot ? 6 : 0  // gap(2) + dot(4)
         let labelHeight: CGFloat = profileName != nil ? 10 : 0
         let labelSpacing: CGFloat = profileName != nil ? 1 : 0
-        let totalWidth = max(textSize.width + 2 + paceDotExtra, profileName != nil ? CGFloat(String(profileName!.prefix(3)).count) * 6 + 4 : 0)
+        let label = profileName.map { String($0.prefix(5)) }
+        let labelAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 8, weight: .medium),
+            .foregroundColor: foregroundColor.withAlphaComponent(0.85)
+        ]
+        let labelWidth = label.map { ($0 as NSString).size(withAttributes: labelAttributes).width + 4 } ?? 0
+        let totalWidth = max(textSize.width + 2 + paceDotExtra, labelWidth)
         let totalHeight = textSize.height + labelSpacing + labelHeight
 
         let image = NSImage(size: NSSize(width: totalWidth, height: totalHeight))
@@ -1303,18 +1313,29 @@ final class MenuBarIconRenderer {
         }
 
         // Profile label below (if shown)
-        if let name = profileName {
-            let label = String(name.prefix(3))
-            let labelAttributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 8, weight: .medium),
-                .foregroundColor: foregroundColor.withAlphaComponent(0.85)
-            ]
+        if let label {
             let labelString = label as NSString
             let labelSize = labelString.size(withAttributes: labelAttributes)
             let labelX = (totalWidth - labelSize.width) / 2
             labelString.draw(at: NSPoint(x: labelX, y: 0), withAttributes: labelAttributes)
         }
 
+        return image
+    }
+
+    /// A clock and neutral tint distinguish saved readings from live healthy usage.
+    func createLastKnownIcon(from source: NSImage, isDarkMode: Bool) -> NSImage {
+        let image = NSImage(size: NSSize(width: source.size.width + 11, height: source.size.height))
+        image.lockFocus()
+        defer { image.unlockFocus() }
+        source.draw(at: .zero, from: .zero, operation: .sourceOver, fraction: 1)
+        menuBarForegroundColor(isDarkMode: isDarkMode).withAlphaComponent(0.65).setFill()
+        NSRect(origin: .zero, size: source.size).fill(using: .sourceAtop)
+        if let clock = NSImage(systemSymbolName: "clock", accessibilityDescription: "Last known reading") {
+            clock.draw(in: NSRect(x: source.size.width + 2, y: max(0, source.size.height - 10), width: 9, height: 9))
+            NSColor.systemOrange.setFill()
+            NSRect(x: source.size.width + 2, y: max(0, source.size.height - 10), width: 9, height: 9).fill(using: .sourceAtop)
+        }
         return image
     }
 

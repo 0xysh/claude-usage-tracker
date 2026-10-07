@@ -4,9 +4,8 @@
 //
 //  Created by Claude Code on 2026-07-15.
 //
-//  Wraps the pre-existing Anthropic fetch chain behind UsageProviderService.
-//  The bodies below were MOVED VERBATIM from MenuBarManager (multi-profile
-//  path) and its single-profile refresh path — behavior must stay identical.
+//  Both active and per-profile refreshes use the same profile-aware source
+//  selection while keeping the existing API requests and refresh policy.
 //
 
 import Foundation
@@ -19,80 +18,136 @@ final class AnthropicUsageProvider: UsageProviderService {
     // Concrete type: the per-profile fetch overloads (sessionKey/oauthAccessToken)
     // are not part of APIServiceProtocol.
     private let apiService: ClaudeAPIService
+    private let cliSource: AnthropicCLICredentialSource
+    private let activeProfileID: @MainActor () -> UUID?
+    private let credentialDiagnostics: @MainActor (String) -> Void
 
-    init(apiService: ClaudeAPIService = ClaudeAPIService()) {
+    init(apiService: ClaudeAPIService = ClaudeAPIService(),
+         cliSource: AnthropicCLICredentialSource = ClaudeCodeSyncService.shared,
+         activeProfileID: @escaping @MainActor () -> UUID? = { ProfileManager.shared.activeProfile?.id },
+         credentialDiagnostics: @escaping @MainActor (String) -> Void = { LoggingService.shared.log($0) }) {
         self.apiService = apiService
+        self.cliSource = cliSource
+        self.activeProfileID = activeProfileID
+        self.credentialDiagnostics = credentialDiagnostics
     }
 
-    /// Profile credentials plus the system-keychain CLI fallback that
-    /// `ClaudeAPIService.getAuthentication()` can discover during the actual
-    /// API call (mirrors the old `MenuBarManager.hasAnyAvailableCredentials`).
+    /// Known CLI configuration also allows a refresh attempt when expired or
+    /// incomplete, so the UI receives a useful error instead of silently skipping.
     func hasCredentials(for profile: Profile) -> Bool {
-        profile.hasUsageCredentials
-            || ClaudeCodeSyncService.shared.hasUsableSystemCredentials()
+        profile.claudeSessionKey != nil || hasCLIConfiguration(profile)
+            || (profile.id == activeProfileID() && cliSource.hasUsableSystemCredentials())
     }
 
-    /// Fetches usage data for a specific profile using its credentials.
-    /// (Moved verbatim from `MenuBarManager.fetchUsageForProfile(_:)`.)
     func fetchUsage(for profile: Profile) async throws -> ClaudeUsage {
-        // Priority 1: claude.ai session key (cookie-based)
-        if let sessionKey = profile.claudeSessionKey,
-           let orgId = profile.organizationId {
+        // Browser sign-in can precede organization discovery. Preserve that flow
+        // before evaluating the CLI credentials, using the existing API methods.
+        if let sessionKey = profile.claudeSessionKey {
+            let orgId: String
+            if let savedOrgId = profile.organizationId {
+                orgId = savedOrgId
+            } else {
+                // The active-profile helper caches and persists a global org ID.
+                // Discover with this profile's explicit key without touching it.
+                let organizations = try await apiService.fetchAllOrganizations(sessionKey: sessionKey)
+                guard let organization = organizations.first else {
+                    throw AppError(code: .apiParsingFailed, message: "No organizations found for this Claude account.",
+                                   recoverySuggestion: "Choose a Claude account with access to an organization, then refresh.")
+                }
+                orgId = organization.uuid
+            }
             return try await apiService.fetchUsageData(sessionKey: sessionKey, organizationId: orgId)
         }
 
-        // Priority 2: CLI OAuth credentials.
-        // `ensureFreshCredentials` picks the source automatically:
-        //   - If `profile.customKeychainServiceName` is set → pull fresh from that keychain entry
-        //     (which Claude Code rotates during normal CLI use). No network refresh needed when
-        //     the token there is still valid; otherwise transparently refresh via the
-        //     refresh_token grant and write back to both keychain and profile cache.
-        //   - Otherwise → use the profile's cached `cliCredentialsJSON`, refreshing if expired.
-        // If `ensureFreshCredentials` returns nil (e.g. network failure during refresh), fall
-        // back to the stored cliCredentialsJSON so a still-valid cached token isn't wasted.
-        if profile.cliCredentialsJSON != nil || profile.customKeychainServiceName != nil {
-            let usableJSON = await ClaudeCodeSyncService.shared.ensureFreshCredentials(for: profile.id)
-                ?? profile.cliCredentialsJSON
-            if let usableJSON = usableJSON,
-               !ClaudeCodeSyncService.shared.isTokenExpired(usableJSON),
-               let accessToken = ClaudeCodeSyncService.shared.extractAccessToken(from: usableJSON) {
-                return try await apiService.fetchUsageData(oauthAccessToken: accessToken)
+        let savedCLI = profile.cliCredentialsJSON != nil
+        let pinned = profile.customKeychainServiceName != nil
+        let active = profile.id == activeProfileID()
+        var selectedJSON: String?
+        var selectedToken: String?
+        var selectedExpired = false
+        var expiredTokenSeen = false
+
+        func select(_ json: String) {
+            selectedJSON = json
+            selectedToken = cliSource.extractAccessToken(from: json).flatMap {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
+            }
+            selectedExpired = cliSource.isTokenExpired(json)
+            expiredTokenSeen = expiredTokenSeen || (selectedToken != nil && selectedExpired)
+        }
+
+        // Use the existing source-aware selector and its existing rotation
+        // policy; ordinary polling never requests an activation-only rotation.
+        if savedCLI || pinned {
+            if let json = await cliSource.ensureFreshCredentials(for: profile.id, allowRotation: false)
+                ?? profile.cliCredentialsJSON {
+                select(json)
+                if let token = selectedToken, !selectedExpired {
+                    return try await apiService.fetchUsageData(oauthAccessToken: token)
+                }
             }
         }
 
-        // Priority 3: System Keychain CLI OAuth token
-        // Only use system keychain for the active profile — the keychain/credentials file
-        // reflects the currently active `claude` CLI session. Using it for a non-active
-        // profile would silently return the active profile's stats.
-        if profile.id == ProfileManager.shared.activeProfile?.id,
-           let systemCredentials = try? ClaudeCodeSyncService.shared.readSystemCredentials(),
-           !ClaudeCodeSyncService.shared.isTokenExpired(systemCredentials),
-           let accessToken = ClaudeCodeSyncService.shared.extractAccessToken(from: systemCredentials) {
-            return try await apiService.fetchUsageData(oauthAccessToken: accessToken)
+        // A generic CLI session is only a fallback for the active profile. For a
+        // bound account require a positive identity or nonempty lineage match;
+        // two missing identities/tokens never count as the same account.
+        if active, let systemJSON = try? cliSource.readSystemCredentials(),
+           systemAccountMatches(profile, credentials: systemJSON) {
+            select(systemJSON)
+            if let token = selectedToken, !selectedExpired {
+                return try await apiService.fetchUsageData(oauthAccessToken: token)
+            }
         }
 
-        // No usable live credential (e.g. a non-active profile whose CLI token expired and
-        // must not be refreshed independently — that would rotate a token another tool such as
-        // `cux` owns). Rather than surfacing a blocking "session key not found" dialog on every
-        // profile switch, fall back to the profile's last-known usage snapshot. Per-model weekly
-        // quotas change slowly, so a slightly stale reading is far better UX than an error
-        // popup — and the active profile still refreshes live every cycle. (#290)
-        if let cached = profile.claudeUsage {
-            LoggingService.shared.log("AnthropicUsageProvider: no live credential for '\(profile.name)'; showing last-known cached usage")
-            return cached
-        }
+        credentialDiagnostics("AnthropicUsageProvider: credential selection failed savedCLI=\(savedCLI) usableJSONPresent=\(selectedJSON != nil) tokenPresent=\(selectedToken != nil) expired=\(selectedExpired) pinned=\(pinned) active=\(active)")
 
-        throw AppError(
-            code: .sessionKeyNotFound,
-            message: "Missing credentials for profile '\(profile.name)'",
-            isRecoverable: false
-        )
+        // Do not return a persisted snapshot as a successful live refresh. It
+        // remains on Profile for the popup's last-known-data and error state.
+        if expiredTokenSeen {
+            throw AppError(code: .sessionKeyExpired, message: "Claude CLI credentials have expired.",
+                           recoverySuggestion: "Sign in through Claude Code again, sync this account, then refresh.")
+        }
+        if hasCLIConfiguration(profile) || selectedJSON != nil {
+            throw AppError(code: .sessionKeyInvalid, message: "Claude CLI credentials are missing a valid access token.",
+                           recoverySuggestion: "Sign in through Claude Code, sync this account, then refresh.")
+        }
+        throw AppError(code: .sessionKeyNotFound, message: "No usable Claude credentials are available.",
+                       recoverySuggestion: "Connect a Claude account or sync your CLI account, then refresh.")
     }
 
-    /// The single-profile refresh path historically used the no-arg
-    /// `fetchUsageData()`, whose internal `getAuthentication()` chain covers
-    /// the active profile plus system-level fallbacks. Keep that exact path.
     func fetchUsageForActiveProfile(_ profile: Profile) async throws -> ClaudeUsage {
-        try await apiService.fetchUsageData()
+        try await fetchUsage(for: profile)
     }
+
+    private func hasCLIConfiguration(_ profile: Profile) -> Bool {
+        profile.cliCredentialsJSON != nil || profile.customKeychainServiceName != nil
+            || profile.hasCliAccount || profile.oauthAccountJSON != nil
+    }
+
+    private func systemAccountMatches(_ profile: Profile, credentials: String) -> Bool {
+        guard hasCLIConfiguration(profile) else { return true }
+        let profileIdentity = cliSource.accountIdentity(fromOAuthAccountJSON: profile.oauthAccountJSON)
+        let systemIdentity = cliSource.accountIdentity(fromOAuthAccountJSON: cliSource.readOAuthAccount())
+        if let profileIdentity, let systemIdentity { return profileIdentity == systemIdentity }
+        guard let savedJSON = profile.cliCredentialsJSON,
+              let savedLineage = cliSource.extractRefreshToken(from: savedJSON), !savedLineage.isEmpty,
+              let systemLineage = cliSource.extractRefreshToken(from: credentials), !systemLineage.isEmpty else { return false }
+        return savedLineage == systemLineage
+    }
+
 }
+
+/// Narrow injection seam for selection tests; the production implementation
+/// remains the existing Claude Code credential service and refresh policy.
+protocol AnthropicCLICredentialSource {
+    func ensureFreshCredentials(for profileId: UUID, allowRotation: Bool) async -> String?
+    func readSystemCredentials() throws -> String?
+    func readOAuthAccount() -> String?
+    func accountIdentity(fromOAuthAccountJSON json: String?) -> String?
+    func extractAccessToken(from jsonData: String) -> String?
+    func extractRefreshToken(from jsonData: String) -> String?
+    func isTokenExpired(_ jsonData: String) -> Bool
+    func hasUsableSystemCredentials() -> Bool
+}
+
+extension ClaudeCodeSyncService: AnthropicCLICredentialSource {}

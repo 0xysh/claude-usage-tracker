@@ -10,12 +10,15 @@ class MenuBarManager: NSObject, ObservableObject {
     @Published private(set) var status: ClaudeStatus = .unknown
     @Published private(set) var apiUsage: APIUsage?
     @Published private(set) var isRefreshing: Bool = false
+    @Published private(set) var popoverPresentationID = UUID()
+    @Published private(set) var refreshingProfileIDs: Set<UUID> = []
 
     // Error tracking for stale data / credential banners
     @Published private(set) var hasCredentialError: Bool = false
     @Published private(set) var consecutiveRefreshFailures: Int = 0
     @Published private(set) var lastRefreshError: String? = nil
     @Published private(set) var lastSuccessfulRefreshTime: Date? = nil
+    @Published private(set) var profileRefreshErrors: [UUID: String] = [:]
 
     // Multi-profile mode: track which profile's icon was clicked
     @Published private(set) var clickedProfileId: UUID?
@@ -118,6 +121,10 @@ class MenuBarManager: NSObject, ObservableObject {
     private var updateDebounceTimer: Timer?
     private var cachedIsDarkMode: Bool = false
 
+    private var usesCombinedMenuBar: Bool {
+        SharedDataStore.shared.loadPopoverShowAllProfiles()
+    }
+
     func setup() {
         // Initialize cached appearance to avoid layout recursion
         cachedIsDarkMode = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -129,8 +136,10 @@ class MenuBarManager: NSObject, ObservableObject {
         statusBarUIManager = StatusBarUIManager()
         statusBarUIManager?.delegate = self
 
-        // Check if we should use multi-profile mode
-        if profileManager.displayMode == .multi {
+        // The combined summary takes precedence over single/multi profile mode.
+        if usesCombinedMenuBar {
+            updateCombinedProfileDisplay()
+        } else if profileManager.displayMode == .multi {
             // Multi-profile mode - setup with selected profiles
             setupMultiProfileMode()
         } else {
@@ -190,7 +199,7 @@ class MenuBarManager: NSObject, ObservableObject {
             guard let self = self else { return }
 
             // Skip only if no credentials exist anywhere (profile or system keychain)
-            guard self.hasAnyAvailableCredentials() else {
+            guard self.usesCombinedMenuBar || self.hasAnyAvailableCredentials() else {
                 LoggingService.shared.log("Skipping network-available refresh (no credentials available)")
                 return
             }
@@ -206,7 +215,7 @@ class MenuBarManager: NSObject, ObservableObject {
 
         // Initial data fetch (with small delay for launch-at-login scenarios).
         // Includes system Keychain CLI credentials as a fallback.
-        if hasAnyAvailableCredentials() {
+        if usesCombinedMenuBar || hasAnyAvailableCredentials() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                 self?.refreshUsage()
             }
@@ -319,6 +328,8 @@ class MenuBarManager: NSObject, ObservableObject {
         lastKnownAPIResetTime.removeValue(forKey: profileId)
         resetJustRecorded.removeValue(forKey: profileId)
         autoSwitchedProfileIds.remove(profileId)
+        profileRefreshErrors.removeValue(forKey: profileId)
+        refreshingProfileIDs.remove(profileId)
     }
 
     // MARK: - Profile Observation
@@ -358,6 +369,22 @@ class MenuBarManager: NSObject, ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Selection, names, and cached readings can change without switching the
+        // active account. Retain the combined item's identity while repainting.
+        profileManager.$profiles
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                if self.usesCombinedMenuBar {
+                    self.updateAllStatusBarIcons()
+                } else if self.profileManager.displayMode == .multi {
+                    self.updateMultiProfileDisplay()
+                }
+            }
+            .store(in: &cancellables)
+
         LoggingService.shared.log("MenuBarManager: Observing profile changes (initial: \(initialProfileId?.uuidString ?? "nil"))")
     }
 
@@ -384,7 +411,7 @@ class MenuBarManager: NSObject, ObservableObject {
 
         // 3. Update menu bar based on current display mode
         // IMPORTANT: In multi-profile mode, we update all icons, not just switch config
-        if profileManager.displayMode == .multi {
+        if usesCombinedMenuBar || profileManager.displayMode == .multi {
             // Multi-profile mode - update icons without recreating status items
             updateMultiProfileDisplay()
         } else {
@@ -397,7 +424,7 @@ class MenuBarManager: NSObject, ObservableObject {
 
         // 5. Trigger immediate refresh if any credentials are available, including
         // system Keychain CLI fallback used by ClaudeAPIService.
-        if hasAnyAvailableCredentials() {
+        if usesCombinedMenuBar || hasAnyAvailableCredentials() {
             self.lastRefreshTriggerTime = Date()
             refreshUsage()
         } else {
@@ -432,6 +459,14 @@ class MenuBarManager: NSObject, ObservableObject {
     }
 
     private func updateMenuBarDisplay(with config: MenuBarIconConfiguration) {
+        if usesCombinedMenuBar {
+            updateCombinedProfileDisplay()
+            return
+        }
+        if statusBarUIManager?.isInCombinedProfileMode == true {
+            handleDisplayModeChange()
+            return
+        }
         // Skip if in multi-profile mode - this method is for single profile mode only
         guard profileManager.displayMode == .single else {
             LoggingService.shared.log("MenuBarManager: Skipping updateMenuBarDisplay (in multi-profile mode)")
@@ -520,10 +555,33 @@ class MenuBarManager: NSObject, ObservableObject {
         return hostingController
     }
 
+    private func resizeDetachedDashboard(_ window: NSWindow, to height: CGFloat) {
+        guard detachedWindow === window, height.isFinite, height > 0 else { return }
+        let current = window.contentRect(forFrameRect: window.frame).size
+        guard abs(current.height - height) >= 1 else { return }
+        // Detached hosting deliberately has no preferred-size tracking. Keep that
+        // contract and update only its measured content height, without animation.
+        let content = NSRect(origin: .zero, size: NSSize(width: current.width, height: height))
+        let size = window.frameRect(forContentRect: content).size
+        var frame = window.frame
+        frame.origin.y = frame.maxY - size.height
+        frame.size = size
+        window.setFrame(frame, display: true, animate: false)
+    }
+
+    func showDashboard() {
+        if let detachedWindow, detachedWindow.isVisible {
+            detachedWindow.makeKeyAndOrderFront(nil)
+        } else if popover?.isShown != true {
+            togglePopover(nil)
+        }
+    }
+
     @objc private func togglePopover(_ sender: Any?) {
         // Right-click → show context menu instead of toggling the popover
-        if let event = NSApp.currentEvent, event.type == .rightMouseUp {
-            showContextMenu(for: sender as? NSStatusBarButton)
+        if let button = sender as? NSStatusBarButton,
+           let event = NSApp.currentEvent, event.type == .rightMouseUp {
+            showContextMenu(for: button)
             return
         }
 
@@ -549,7 +607,7 @@ class MenuBarManager: NSObject, ObservableObject {
            let profile = profileManager.profiles.first(where: { $0.id == profileId }) {
             // Set the clicked profile data
             clickedProfileId = profileId
-            clickedProfileUsage = profile.claudeUsage ?? .empty
+            clickedProfileUsage = profile.claudeUsage
             clickedProfileAPIUsage = profile.apiUsage
             LoggingService.shared.log("Multi-profile popover: showing data for '\(profile.name)'")
         } else {
@@ -611,6 +669,7 @@ class MenuBarManager: NSObject, ObservableObject {
     /// Shows `popover` anchored to a status bar button and gives its backing window
     /// the Space placement a menu bar popover needs to appear over a full-screen app.
     private func showPopover(_ popover: NSPopover, from button: NSStatusBarButton) {
+        popoverPresentationID = UUID()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         if let window = popover.contentViewController?.view.window {
             window.enableDisplayOnFullScreenSpaces()
@@ -698,6 +757,14 @@ class MenuBarManager: NSObject, ObservableObject {
 
     /// Updates all enabled status bar icons
     private func updateAllStatusBarIcons() {
+        if usesCombinedMenuBar {
+            updateCombinedProfileDisplay()
+            return
+        }
+        if statusBarUIManager?.isInCombinedProfileMode == true {
+            handleDisplayModeChange()
+            return
+        }
         // Check if in multi-profile mode
         if profileManager.displayMode == .multi {
             // Update multi-profile icons using profiles from profileManager
@@ -705,19 +772,26 @@ class MenuBarManager: NSObject, ObservableObject {
             statusBarUIManager?.updateMultiProfileButtons(
                 profiles: profileManager.profiles,
                 config: config,
-                activeProfileId: profileManager.activeProfile?.id
+                activeProfileId: profileManager.activeProfile?.id,
+                errors: profileRefreshErrors
             )
         } else {
             // Single profile mode - use the standard update
             statusBarUIManager?.updateAllButtons(
                 usage: usage,
-                apiUsage: apiUsage
+                apiUsage: apiUsage,
+                usageAvailable: profileManager.activeProfile?.claudeUsage != nil,
+                refreshFailed: profileManager.activeProfile.map { profileRefreshErrors[$0.id] != nil } ?? false
             )
         }
     }
 
     /// Updates a specific metric's status bar icon
     private func updateStatusBarIcon(for metricType: MenuBarMetricType) {
+        if usesCombinedMenuBar {
+            updateAllStatusBarIcons()
+            return
+        }
         statusBarUIManager?.updateButton(
             for: metricType,
             usage: usage,
@@ -811,6 +885,12 @@ class MenuBarManager: NSObject, ObservableObject {
             Task { @MainActor in
                 // Check if active profile has any credentials, including system
                 // Keychain CLI fallback.
+                if self.usesCombinedMenuBar {
+                    self.updateCombinedProfileDisplay()
+                    self.lastRefreshTriggerTime = Date()
+                    self.refreshUsage()
+                    return
+                }
                 guard let profile = self.profileManager.activeProfile, self.hasAnyAvailableCredentials() else {
                     LoggingService.shared.logInfo("Credentials changed but no usage credentials - showing default logo")
 
@@ -846,7 +926,7 @@ class MenuBarManager: NSObject, ObservableObject {
             // Reload configuration from active profile (already on main queue)
             Task { @MainActor in
                 // Handle differently based on display mode
-                if self.profileManager.displayMode == .multi {
+                if self.usesCombinedMenuBar || self.profileManager.displayMode == .multi {
                     // Multi-profile mode - update icons without recreating status items
                     self.updateMultiProfileDisplay()
                 } else {
@@ -884,7 +964,15 @@ class MenuBarManager: NSObject, ObservableObject {
             guard let self = self else { return }
 
             Task { @MainActor in
-                self.updateMultiProfileDisplay()
+                let wasCombined = self.statusBarUIManager?.isInCombinedProfileMode == true
+                if self.profileManager.displayMode == .multi {
+                    self.updateMultiProfileDisplay()
+                } else {
+                    self.updateAllStatusBarIcons()
+                }
+                if self.usesCombinedMenuBar && !wasCombined {
+                    self.refreshUsage()
+                }
             }
         }
     }
@@ -893,6 +981,12 @@ class MenuBarManager: NSObject, ObservableObject {
         let displayMode = profileManager.displayMode
 
         LoggingService.shared.log("MenuBarManager: Display mode changed to \(displayMode.rawValue)")
+
+        if usesCombinedMenuBar {
+            updateCombinedProfileDisplay()
+            return
+        }
+        prepareForStatusBarRebuild()
 
         if displayMode == .multi {
             // Switch to multi-profile mode
@@ -927,7 +1021,16 @@ class MenuBarManager: NSObject, ObservableObject {
 
         if !uiManager.hasValidStatusBar {
             LoggingService.shared.log("MenuBarManager: Headless mode - display connected, retrying status bar setup (screens: \(NSScreen.screens.count))")
-            setup()
+            if usesCombinedMenuBar {
+                // Retry only the native item; observers and refresh services
+                // were already initialized during headless startup.
+                uiManager.setupCombinedProfileSummary(
+                    profiles: profileManager.profiles, config: profileManager.multiProfileConfig,
+                    errors: profileRefreshErrors, target: self, action: #selector(togglePopover))
+                DispatchQueue.main.async { [weak self] in self?.updateAllStatusBarIcons() }
+            } else {
+                setup()
+            }
         }
     }
 
@@ -945,6 +1048,10 @@ class MenuBarManager: NSObject, ObservableObject {
     }
 
     private func setupMultiProfileMode() {
+        if usesCombinedMenuBar {
+            updateCombinedProfileDisplay()
+            return
+        }
         let selectedProfiles = profileManager.getSelectedProfiles()
         let config = profileManager.multiProfileConfig
 
@@ -957,7 +1064,7 @@ class MenuBarManager: NSObject, ObservableObject {
         // Defer icon update to next run loop iteration to let NSStatusBar finalize layout
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            self.statusBarUIManager?.updateMultiProfileButtons(profiles: self.profileManager.profiles, config: config, activeProfileId: self.profileManager.activeProfile?.id)
+            self.updateAllStatusBarIcons()
         }
 
         LoggingService.shared.log("MenuBarManager: Multi-profile mode enabled with \(selectedProfiles.count) profiles, style=\(config.iconStyle.rawValue)")
@@ -969,6 +1076,14 @@ class MenuBarManager: NSObject, ObservableObject {
     /// Incrementally updates multi-profile status items (without destroying/recreating them)
     /// Use this when only icon config changed but the set of profiles may or may not have changed.
     private func updateMultiProfileDisplay() {
+        if usesCombinedMenuBar {
+            updateCombinedProfileDisplay()
+            return
+        }
+        if statusBarUIManager?.isInCombinedProfileMode == true {
+            handleDisplayModeChange()
+            return
+        }
         let selectedProfiles = profileManager.getSelectedProfiles()
         let config = profileManager.multiProfileConfig
 
@@ -983,19 +1098,49 @@ class MenuBarManager: NSObject, ObservableObject {
         // This prevents potential flicker or layout issues during incremental updates.
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            self.statusBarUIManager?.updateMultiProfileButtons(profiles: self.profileManager.profiles, config: config, activeProfileId: self.profileManager.activeProfile?.id)
+            self.updateAllStatusBarIcons()
         }
 
         LoggingService.shared.log("MenuBarManager: Multi-profile display updated incrementally with \(selectedProfiles.count) profiles")
     }
 
+    private func prepareForStatusBarRebuild() {
+        closePopoverOrWindow()
+        currentPopoverButton = nil
+        lastPopoverCloseButton = nil
+        lastPopoverCloseDate = .distantPast
+        clickedProfileId = nil
+        clickedProfileUsage = nil
+        clickedProfileAPIUsage = nil
+    }
+
+    private func updateCombinedProfileDisplay() {
+        guard let uiManager = statusBarUIManager else { return }
+        if uiManager.isInCombinedProfileMode {
+            uiManager.updateCombinedProfileSummary(
+                profiles: profileManager.profiles, config: profileManager.multiProfileConfig,
+                errors: profileRefreshErrors)
+        } else {
+            prepareForStatusBarRebuild()
+            uiManager.setupCombinedProfileSummary(
+                profiles: profileManager.profiles, config: profileManager.multiProfileConfig,
+                errors: profileRefreshErrors, target: self, action: #selector(togglePopover))
+            // Let the fixed native item finish layout before assigning its image.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.usesCombinedMenuBar else { return }
+                self.updateAllStatusBarIcons()
+            }
+        }
+    }
+
     /// Refreshes usage data for all profiles selected for multi-profile display
-    private func refreshAllSelectedProfiles() {
-        // Filter on `hasAnyCredentials` (not `hasUsageCredentials`) so that profiles
-        // whose CLI OAuth token has expired are still polled — `fetchUsageForProfile`
-        // will transparently refresh expired tokens via the refresh_token grant.
-        // Excluding them here would prevent the refresh path from ever running.
-        let selectedProfiles = profileManager.profiles.filter { $0.isSelectedForDisplay && $0.hasAnyCredentials }
+    private func refreshAllSelectedProfiles(profileID: UUID? = nil) {
+        // Keep unavailable accounts visible and let each provider report its
+        // own connection error rather than silently excluding that account.
+        guard !isRefreshing else { return }
+        let selectedProfiles = profileManager.profiles.filter { profile in
+            profileID.map { profile.id == $0 } ?? profile.isSelectedForDisplay
+        }
 
         guard !selectedProfiles.isEmpty else {
             LoggingService.shared.log("MenuBarManager: No selected profiles with usage credentials to refresh")
@@ -1004,12 +1149,10 @@ class MenuBarManager: NSObject, ObservableObject {
         }
 
         LoggingService.shared.log("MenuBarManager: Refreshing \(selectedProfiles.count) selected profiles for multi-profile mode")
+        isRefreshing = true
+        refreshingProfileIDs = Set(selectedProfiles.map(\.id))
 
         Task {
-            await MainActor.run {
-                self.isRefreshing = true
-            }
-
             // Fetch Claude status (same as single profile mode)
             do {
                 let newStatus = try await statusServiceForActiveProfile.fetchStatus()
@@ -1032,6 +1175,7 @@ class MenuBarManager: NSObject, ObservableObject {
                     let newUsage = try await fetchUsageForProfile(profile)
 
                     await MainActor.run {
+                        self.profileRefreshErrors.removeValue(forKey: profile.id)
                         // Check for resets before updating usage
                         self.checkAndRecordSessionReset(
                             profileId: profile.id,
@@ -1077,6 +1221,10 @@ class MenuBarManager: NSObject, ObservableObject {
                         }
                     }
                 } catch {
+                    let appError = AppError.wrap(error)
+                    await MainActor.run {
+                        self.profileRefreshErrors[profile.id] = appError.message
+                    }
                     LoggingService.shared.logError("Failed to refresh profile '\(profile.name)': \(error.localizedDescription)")
                 }
 
@@ -1107,17 +1255,9 @@ class MenuBarManager: NSObject, ObservableObject {
 
             // Update all icons once after all profiles are refreshed
             await MainActor.run {
-                let config = self.profileManager.multiProfileConfig
-                self.statusBarUIManager?.updateMultiProfileButtons(
-                    profiles: self.profileManager.profiles,
-                    config: config,
-                    activeProfileId: self.profileManager.activeProfile?.id
-                )
-                self.consecutiveRefreshFailures = 0
-                self.lastRefreshError = nil
-                self.hasCredentialError = false
-                self.lastSuccessfulRefreshTime = Date()
+                self.updateAllStatusBarIcons()
                 self.isRefreshing = false
+                self.refreshingProfileIDs = []
 
                 // Check auto-switch for the active profile
                 if let activeProfile = self.profileManager.activeProfile,
@@ -1129,17 +1269,14 @@ class MenuBarManager: NSObject, ObservableObject {
     }
 
     /// Fetches usage data for a specific profile using its provider's service.
-    /// (The Anthropic 3-source chain that used to live here moved verbatim to
-    /// `AnthropicUsageProvider.fetchUsage(for:)`.)
+    /// Each provider selects credentials belonging to the requested profile.
     private func fetchUsageForProfile(_ profile: Profile) async throws -> ClaudeUsage {
         try await ProviderRegistry.service(for: profile.provider).fetchUsage(for: profile)
     }
 
     private func setupSingleProfileMode() {
-        guard let profile = profileManager.activeProfile else { return }
-
         let hasUsageCredentials = hasAnyAvailableCredentials()
-        let config = profile.iconConfig
+        let config = profileManager.activeProfile?.iconConfig ?? .default
 
         // If no usage credentials, create empty config to show default logo
         let displayConfig: MenuBarIconConfiguration
@@ -1168,9 +1305,26 @@ class MenuBarManager: NSObject, ObservableObject {
         LoggingService.shared.log("MenuBarManager: Single profile mode enabled")
     }
 
+    func refreshProfile(_ id: UUID) {
+        refreshAllSelectedProfiles(profileID: id)
+    }
+
+    func configureProfile(_ id: UUID) {
+        closePopoverOrWindow()
+        Task {
+            guard let profile = profileManager.profiles.first(where: { $0.id == id }) else { return }
+            await profileManager.activateProfile(id)
+            guard profileManager.activeProfile?.id == id else { return }
+            let section: SettingsSection = profile.provider == .codex ? .codexAccount
+                : (profile.hasCliAccount ? .cliAccount : .claudeAI)
+            showPreferences(initialSection: section)
+        }
+    }
+
     func refreshUsage() {
+        guard !isRefreshing else { return }
         // In multi-profile mode, refresh ALL selected profiles
-        if profileManager.displayMode == .multi {
+        if profileManager.displayMode == .multi || SharedDataStore.shared.loadPopoverShowAllProfiles() {
             refreshAllSelectedProfiles()
             return
         }
@@ -1198,22 +1352,20 @@ class MenuBarManager: NSObject, ObservableObject {
         }
 
         LoggingService.shared.log("MenuBarManager: Proceeding with refresh")
+        isRefreshing = true
+        let requestStatusService = profile.provider.descriptor.statusPageURL.map {
+            ClaudeStatusService(statusURL: $0)
+        } ?? statusService
         Task {
-            // Set loading state (keep existing data visible during refresh)
-            await MainActor.run {
-                self.isRefreshing = true
-            }
-
             // Capture previous usage BEFORE fetching new data (for reset detection)
-            let previousUsage = await MainActor.run { self.usage }
-            let previousAPIUsage = await MainActor.run { self.apiUsage }
-            let currentProfileId = await MainActor.run { self.profileManager.activeProfile?.id }
+            let previousUsage = profile.claudeUsage
+            let previousAPIUsage = profile.apiUsage
+            let currentProfileId: UUID? = profile.id
 
-            // Fetch usage and status in parallel (usage via the profile's provider;
-            // for Anthropic this is the same no-arg fetchUsageData() chain as before)
+            // Fetch usage and status for the captured profile in parallel.
             let providerService = ProviderRegistry.service(for: profile.provider)
             async let usageResult = providerService.fetchUsageForActiveProfile(profile)
-            async let statusResult = statusServiceForActiveProfile.fetchStatus()
+            async let statusResult = requestStatusService.fetchStatus()
 
             var usageSuccess = false
 
@@ -1222,6 +1374,7 @@ class MenuBarManager: NSObject, ObservableObject {
                 let newUsage = try await usageResult
 
                 await MainActor.run {
+                    guard self.profileManager.profiles.contains(where: { $0.id == profile.id }) else { return }
                     // Check for resets before updating usage
                     if let profileId = currentProfileId {
                         self.checkAndRecordSessionReset(
@@ -1240,19 +1393,16 @@ class MenuBarManager: NSObject, ObservableObject {
                         UsageHistoryService.shared.recordWeeklyPeriodic(for: profileId, usage: newUsage, provider: profile.provider)
                     }
 
+                    self.profileManager.saveClaudeUsage(newUsage, for: profile.id)
+                    guard self.profileManager.activeProfile?.id == profile.id else { return }
                     self.usage = newUsage
-
-                    // Save to active profile instead of global DataStore
-                    if let profileId = self.profileManager.activeProfile?.id {
-                        self.profileManager.saveClaudeUsage(newUsage, for: profileId)
-                    }
 
                     // Write statusline cache for instant CLI rendering (Claude Code only)
                     if profile.provider.descriptor.capabilities.cliAccountSync,
                        StatuslineService.shared.isInstalled {
                         StatuslineService.shared.writeUsageCache(
                             usage: newUsage,
-                            profileName: self.profileManager.activeProfile?.name
+                            profileName: profile.name
                         )
                     }
 
@@ -1277,6 +1427,8 @@ class MenuBarManager: NSObject, ObservableObject {
                 usageSuccess = true
 
                 await MainActor.run {
+                    self.profileRefreshErrors.removeValue(forKey: profile.id)
+                    guard self.profileManager.activeProfile?.id == profile.id else { return }
                     self.consecutiveRefreshFailures = 0
                     self.lastRefreshError = nil
                     self.hasCredentialError = false
@@ -1293,6 +1445,8 @@ class MenuBarManager: NSObject, ObservableObject {
 
                 // Track error state for UI banners
                 await MainActor.run {
+                    self.profileRefreshErrors[profile.id] = appError.message
+                    guard self.profileManager.activeProfile?.id == profile.id else { return }
                     self.consecutiveRefreshFailures += 1
                     self.lastRefreshError = appError.message
 
@@ -1316,6 +1470,7 @@ class MenuBarManager: NSObject, ObservableObject {
             do {
                 let newStatus = try await statusResult
                 await MainActor.run {
+                    guard self.profileManager.activeProfile?.id == profile.id else { return }
                     self.status = newStatus
                 }
             } catch {
@@ -1327,15 +1482,15 @@ class MenuBarManager: NSObject, ObservableObject {
                 LoggingService.shared.log("MenuBarManager: Failed to fetch status - [\(appError.code.rawValue)] \(appError.message)")
             }
 
-            // Fetch API usage (using active profile's API credentials; console
+            // Fetch API usage (using the captured profile's API credentials; console
             // billing is provider-gated)
-            if let profile = await MainActor.run(body: { self.profileManager.activeProfile }),
-               profile.provider.descriptor.capabilities.consoleBilling,
+            if profile.provider.descriptor.capabilities.consoleBilling,
                let apiSessionKey = profile.apiSessionKey,
                let orgId = profile.apiOrganizationId {
                 do {
                     let newAPIUsage = try await apiService.fetchAPIUsageData(organizationId: orgId, apiSessionKey: apiSessionKey)
                     await MainActor.run {
+                        guard self.profileManager.profiles.contains(where: { $0.id == profile.id }) else { return }
                         // Check for billing cycle reset before updating usage
                         if let profileId = currentProfileId {
                             self.checkAndRecordBillingCycleReset(
@@ -1345,11 +1500,9 @@ class MenuBarManager: NSObject, ObservableObject {
                             )
                         }
 
-                        self.apiUsage = newAPIUsage
-
-                        // Save to active profile instead of global DataStore
-                        if let profileId = self.profileManager.activeProfile?.id {
-                            self.profileManager.saveAPIUsage(newAPIUsage, for: profileId)
+                        self.profileManager.saveAPIUsage(newAPIUsage, for: profile.id)
+                        if self.profileManager.activeProfile?.id == profile.id {
+                            self.apiUsage = newAPIUsage
                         }
                     }
                 } catch {
@@ -1366,7 +1519,8 @@ class MenuBarManager: NSObject, ObservableObject {
                 self.isRefreshing = false
 
                 // Show success notification if this was user-triggered and successful
-                if usageSuccess && abs(self.lastRefreshTriggerTime.timeIntervalSinceNow) < 5 {
+                if usageSuccess && self.profileManager.activeProfile?.id == profile.id
+                    && abs(self.lastRefreshTriggerTime.timeIntervalSinceNow) < 5 {
                     self.showSuccessNotification()
                 }
             }
@@ -1600,11 +1754,16 @@ class MenuBarManager: NSObject, ObservableObject {
     }
 
     @objc private func preferencesClicked() {
+        showPreferences()
+    }
+
+    private func showPreferences(initialSection: SettingsSection = .appearance) {
         // Close the popover or detached window first
         closePopoverOrWindow()
 
         // If settings window already exists, just bring it to front
         if let existingWindow = settingsWindow, existingWindow.isVisible {
+            NotificationCenter.default.post(name: .settingsSectionRequested, object: initialSection)
             existingWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -1616,7 +1775,8 @@ class MenuBarManager: NSObject, ObservableObject {
             NSApp.setActivationPolicy(.regular)
 
             // Create and show the settings window
-            let window = SettingsWindowBuilder.makeWindow(size: Constants.WindowSizes.settingsWindow)
+            let window = SettingsWindowBuilder.makeWindow(size: Constants.WindowSizes.settingsWindow,
+                                                         initialSection: initialSection)
             window.title = "Claude Usage - Settings"
             window.center()
             window.isReleasedWhenClosed = false
@@ -1814,32 +1974,20 @@ extension MenuBarManager: NSPopoverDelegate {
         // Stop monitoring for outside clicks when detaching
         stopMonitoringForOutsideClicks()
 
-        // Create content view controller sized for a window (not a popover).
-        // We don't use createContentViewController() here because its
-        // preferredContentSize/sizingOptions (added by PR #200 for popover
-        // positioning) conflict with the window's layout constraints.
-        let contentView = PopoverContentView(
-            manager: self,
-            onRefresh: { [weak self] in self?.refreshUsage() },
-            onPreferences: { [weak self] in
-                self?.closePopoverOrWindow()
-                self?.preferencesClicked()
-            }
-        )
-        let hostingController = NSHostingController(rootView: contentView)
-
+        let size = SharedDataStore.shared.loadPopoverShowAllProfiles()
+            ? NSSize(width: 360, height: min(680, max(320, (NSScreen.main?.visibleFrame.height ?? 800) - 120)))
+            : NSSize(width: 280, height: 600)
         let window = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 280, height: 600),
+            contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .nonactivatingPanel, .hudWindow],
             backing: .buffered,
             defer: false
         )
-        window.contentViewController = hostingController
         window.title = ""
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
-        window.setContentSize(NSSize(width: 280, height: 600))
+        window.setContentSize(size)
         window.isReleasedWhenClosed = false
         window.level = .floating
         // Allow a torn-off popover to stay on a full-screen app's Space.
@@ -1850,6 +1998,24 @@ extension MenuBarManager: NSPopoverDelegate {
 
         // Store reference to the detached window
         detachedWindow = window
+
+        // Detached hosting deliberately omits preferredContentSize/sizingOptions:
+        // tracking those conflicts with the panel's own layout constraints.
+        // A late measurement may only resize the panel that owns this content.
+        let contentView = PopoverContentView(
+            manager: self,
+            onRefresh: { [weak self] in self?.refreshUsage() },
+            onPreferences: { [weak self] in
+                self?.closePopoverOrWindow()
+                self?.preferencesClicked()
+            },
+            onContentHeightChanged: { [weak self, weak window] height in
+                guard let window else { return }
+                self?.resizeDetachedDashboard(window, to: height)
+            }
+        )
+        let hostingController = NSHostingController(rootView: contentView)
+        window.contentViewController = hostingController
 
         return window
     }

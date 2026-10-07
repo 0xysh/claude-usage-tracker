@@ -11,8 +11,20 @@ import Foundation
 class ProfileStore {
     static let shared = ProfileStore()
 
+    static let persistenceStatusChanged = Notification.Name("ProfileStore.persistenceStatusChanged")
+
     private let defaults: UserDefaults
-    private let keychainService = KeychainService.shared
+    private let legacySecrets: ProfileLegacySecretStorage
+    private let persistence: SecureProfilePersistence<[Profile]>
+    private let lock = NSRecursiveLock()
+    private var pendingProfiles: [Profile]?
+    private var persistenceError: SecureProfilePersistenceError?
+
+    var lastPersistenceError: SecureProfilePersistenceError? {
+        lock.lock()
+        defer { lock.unlock() }
+        return persistenceError
+    }
 
     private enum Keys {
         static let profiles = "profiles_v3"
@@ -21,135 +33,133 @@ class ProfileStore {
         static let multiProfileConfig = "multiProfileDisplayConfig"
     }
 
-    /// One-time flag so the expected no-keychain-store situation on ad-hoc dev
-    /// builds is logged once, not on every save cycle.
-    private static var loggedNoKeychainStoreOnce = false
-
-    init() {
-        // Use standard UserDefaults (app container)
-        self.defaults = UserDefaults.standard
-        LoggingService.shared.log("ProfileStore: Using standard app container storage")
+    init(defaults: UserDefaults = .standard,
+         documentStorage: ProfileDocumentStorage? = nil,
+         snapshotStorage: ProfileSnapshotStorage = KeychainService.shared,
+         legacySecrets: ProfileLegacySecretStorage = KeychainService.shared) {
+        self.defaults = defaults
+        self.legacySecrets = legacySecrets
+        self.persistence = SecureProfilePersistence(
+            documentStorage: documentStorage ?? DefaultsProfileDocumentStorage(defaults: defaults, key: Keys.profiles),
+            snapshotStorage: snapshotStorage
+        )
     }
 
     // MARK: - Profile Management
 
-    func saveProfiles(_ profiles: [Profile]) {
-        // Persist credential fields to the Keychain FIRST; the plist encoding below
-        // excludes them (#267 / GHSA-mfxh-xpwm-23c7 — the plist is cleartext on disk).
-        var allSecretsInKeychain = true
-        for profile in profiles {
-            allSecretsInKeychain = persistSecrets(of: profile) && allSecretsInKeychain
-        }
-
+    /// Stage a complete immutable secure snapshot before committing metadata.
+    /// Failure preserves attempted edits in memory and leaves durable originals
+    /// available; credentials are never newly written to UserDefaults.
+    @discardableResult
+    func saveProfiles(_ profiles: [Profile]) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        pendingProfiles = profiles
         do {
+            let previous = try persistence.load()
+            if let previous, previous.isLegacy {
+                // A denied legacy read is not an absent credential. Do not
+                // replace a legacy document until all of it is recoverable.
+                _ = try hydrateLegacyProfiles(previous.profiles)
+            } else if let previous {
+                guard let data = previous.credentials,
+                      let snapshot = try? JSONDecoder().decode(ProfileCredentialSnapshot.self, from: data) else {
+                    throw SecureProfilePersistenceError.secureReadFailed
+                }
+                _ = try snapshot.hydrate(previous.profiles)
+            }
             let encoder = JSONEncoder()
-            encoder.outputFormatting = .prettyPrinted // For debugging
-            if !allSecretsInKeychain {
-                // Zero-data-loss fallback: if any Keychain write failed, keep the
-                // credentials in the plist for this save so nothing is lost; the
-                // migration retries on the next save.
-                encoder.userInfo[Profile.includeSecretsKey] = true
-                if keychainService.profileSecretStorageKnownUnavailable {
-                    // Expected on ad-hoc dev builds — not an error, and saves run
-                    // on every refresh, so say it once instead of every cycle.
-                    if !Self.loggedNoKeychainStoreOnce {
-                        Self.loggedNoKeychainStoreOnce = true
-                        LoggingService.shared.log("ProfileStore: no reachable keychain store in this build — credentials remain in plist (expected for ad-hoc dev builds)")
-                    }
-                } else {
-                    LoggingService.shared.logError("ProfileStore: Keychain write failed — keeping credentials in plist for this save (will retry)")
+            encoder.outputFormatting = .sortedKeys
+            let credentials = try encoder.encode(ProfileCredentialSnapshot(profiles: profiles))
+            try persistence.save(profiles, credentials: credentials)
+            pendingProfiles = nil
+            setPersistenceError(nil)
+            if let previous, previous.isLegacy {
+                // The new snapshot and metadata are durably committed. Legacy
+                // canonical keys can now be removed, including deleted profiles.
+                for profile in previous.profiles {
+                    legacySecrets.deleteAllProfileSecrets(profileId: profile.id)
                 }
             }
-            let data = try encoder.encode(profiles)
-            defaults.set(data, forKey: Keys.profiles)
-
-            // Verify save
-            if let savedData = defaults.data(forKey: Keys.profiles) {
-                LoggingService.shared.log("ProfileStore: Saved \(profiles.count) profiles (\(savedData.count) bytes)")
-            } else {
-                LoggingService.shared.logError("ProfileStore: Failed to verify save!")
-            }
+            return true
         } catch {
-            LoggingService.shared.logStorageError("saveProfiles", error: error)
+            setPersistenceError(error as? SecureProfilePersistenceError ?? .invalidDocument)
+            return false
         }
     }
 
     func loadProfiles() -> [Profile] {
-        guard let data = defaults.data(forKey: Keys.profiles) else {
-            LoggingService.shared.log("ProfileStore: No profiles found in storage")
-            return []
-        }
-
+        lock.lock()
+        defer { lock.unlock() }
+        if let pendingProfiles { return pendingProfiles }
         do {
-            var profiles = try JSONDecoder().decode([Profile].self, from: data)
-
-            // Hydrate credential fields from the Keychain. A value still present in
-            // the plist wins (it is either pre-migration, or was written by an older
-            // app version more recently than our Keychain copy) and gets migrated on
-            // the save below.
-            var plistHadSecrets = false
-            for i in profiles.indices {
-                let id = profiles[i].id
-                if profiles[i].claudeSessionKey != nil {
-                    plistHadSecrets = true
-                } else {
-                    profiles[i].claudeSessionKey = keychainService.loadProfileSecret(profileId: id, field: .claudeSessionKey)
-                }
-                if profiles[i].apiSessionKey != nil {
-                    plistHadSecrets = true
-                } else {
-                    profiles[i].apiSessionKey = keychainService.loadProfileSecret(profileId: id, field: .apiSessionKey)
-                }
-                if profiles[i].cliCredentialsJSON != nil {
-                    plistHadSecrets = true
-                } else {
-                    profiles[i].cliCredentialsJSON = keychainService.loadProfileSecret(profileId: id, field: .cliCredentialsJSON)
-                }
-                if profiles[i].codexCredentialsJSON != nil {
-                    plistHadSecrets = true
-                } else {
-                    profiles[i].codexCredentialsJSON = keychainService.loadProfileSecret(profileId: id, field: .codexCredentialsJSON)
-                }
+            guard let loaded = try persistence.load() else {
+                setPersistenceError(nil)
+                return []
             }
-
-            if plistHadSecrets {
-                LoggingService.shared.log("ProfileStore: migrating plaintext credentials from plist to Keychain (#267)")
-                saveProfiles(profiles)  // writes Keychain + scrubbed plist (or keeps plist on failure)
+            if loaded.isLegacy {
+                let profiles = try hydrateLegacyProfiles(loaded.profiles)
+                // On failure the old bytes and canonical Keychain items remain
+                // intact, and the hydrated edit remains available in memory.
+                _ = saveProfiles(profiles)
+                return profiles
             }
-
-            LoggingService.shared.log("ProfileStore: Loaded \(profiles.count) profiles from storage")
+            guard let credentials = loaded.credentials,
+                  let snapshot = try? JSONDecoder().decode(ProfileCredentialSnapshot.self, from: credentials) else {
+                throw SecureProfilePersistenceError.secureReadFailed
+            }
+            let profiles = try snapshot.hydrate(loaded.profiles)
+            setPersistenceError(nil)
             return profiles
         } catch {
-            LoggingService.shared.logStorageError("loadProfiles", error: error)
-            LoggingService.shared.logError("ProfileStore: Failed to decode profiles, returning empty array")
+            setPersistenceError(error as? SecureProfilePersistenceError ?? .invalidDocument)
             return []
         }
     }
 
-    /// Writes a profile's credential fields to the Keychain (nil deletes the item so a
-    /// signed-out credential can't be resurrected). Returns false if any write failed.
-    /// Every non-nil write is READ BACK and byte-compared before we trust it — the
-    /// plist copy is only ever scrubbed for values proven to be retrievable.
-    private func persistSecrets(of profile: Profile) -> Bool {
-        var ok = true
-        ok = persistSecret(profile.claudeSessionKey, profile.id, .claudeSessionKey) && ok
-        ok = persistSecret(profile.apiSessionKey, profile.id, .apiSessionKey) && ok
-        ok = persistSecret(profile.cliCredentialsJSON, profile.id, .cliCredentialsJSON) && ok
-        ok = persistSecret(profile.codexCredentialsJSON, profile.id, .codexCredentialsJSON) && ok
-        return ok
-    }
-
-    private func persistSecret(_ value: String?, _ profileId: UUID, _ field: KeychainService.ProfileSecretField) -> Bool {
-        guard keychainService.saveProfileSecret(value, profileId: profileId, field: field) else {
-            return false
+    private func hydrateLegacyProfiles(_ profiles: [Profile]) throws -> [Profile] {
+        var hydrated = profiles
+        do {
+            for index in hydrated.indices {
+                let id = hydrated[index].id
+                if hydrated[index].claudeSessionKey == nil {
+                    hydrated[index].claudeSessionKey = try legacySecrets.readProfileSecret(profileId: id, field: .claudeSessionKey)
+                }
+                if hydrated[index].apiSessionKey == nil {
+                    hydrated[index].apiSessionKey = try legacySecrets.readProfileSecret(profileId: id, field: .apiSessionKey)
+                }
+                if hydrated[index].cliCredentialsJSON == nil {
+                    hydrated[index].cliCredentialsJSON = try legacySecrets.readProfileSecret(profileId: id, field: .cliCredentialsJSON)
+                }
+                if hydrated[index].codexCredentialsJSON == nil {
+                    hydrated[index].codexCredentialsJSON = try legacySecrets.readProfileSecret(profileId: id, field: .codexCredentialsJSON)
+                }
+            }
+        } catch {
+            throw SecureProfilePersistenceError.secureReadFailed
         }
-        guard let value = value else { return true }  // deletions need no read-back
-        return keychainService.verifyProfileSecret(value, profileId: profileId, field: field)
+        return hydrated
     }
 
-    /// Removes a deleted profile's Keychain items.
+    private func setPersistenceError(_ error: SecureProfilePersistenceError?) {
+        let changed = persistenceError != error
+        persistenceError = error
+        if let error { LoggingService.shared.logError("ProfileStore: " + (error.errorDescription ?? "Profile storage failed")) }
+        if changed {
+            NotificationCenter.default.post(name: Self.persistenceStatusChanged, object: self,
+                                            userInfo: error.map { ["error": $0] })
+        }
+    }
+
+    /// Legacy cleanup is safe only after this profile has disappeared from a
+    /// durably committed document. Pending deletion never destroys old secrets.
     func deleteProfileSecrets(_ profileId: UUID) {
-        keychainService.deleteAllProfileSecrets(profileId: profileId)
+        lock.lock()
+        defer { lock.unlock() }
+        guard persistenceError == nil,
+              let loaded = try? persistence.load(),
+              !loaded.profiles.contains(where: { $0.id == profileId }) else { return }
+        legacySecrets.deleteAllProfileSecrets(profileId: profileId)
     }
 
     func saveActiveProfileId(_ id: UUID) {
@@ -213,11 +223,14 @@ class ProfileStore {
         profiles[index].apiOrganizationId = credentials.apiOrganizationId
         profiles[index].cliCredentialsJSON = credentials.cliCredentialsJSON
 
-        saveProfiles(profiles)
+        guard saveProfiles(profiles) else {
+            throw lastPersistenceError ?? SecureProfilePersistenceError.secureWriteFailed
+        }
     }
 
     func loadProfileCredentials(_ profileId: UUID) throws -> ProfileCredentials {
         let profiles = loadProfiles()
+        if let error = lastPersistenceError, pendingProfiles == nil { throw error }
         guard let profile = profiles.first(where: { $0.id == profileId }) else {
             throw NSError(domain: "ProfileStore", code: 404, userInfo: [NSLocalizedDescriptionKey: "Profile not found"])
         }
@@ -229,5 +242,56 @@ class ProfileStore {
             apiOrganizationId: profile.apiOrganizationId,
             cliCredentialsJSON: profile.cliCredentialsJSON
         )
+    }
+}
+
+
+protocol ProfileLegacySecretStorage: AnyObject {
+    func readProfileSecret(profileId: UUID, field: KeychainService.ProfileSecretField) throws -> String?
+    func deleteAllProfileSecrets(profileId: UUID)
+}
+
+private final class DefaultsProfileDocumentStorage: ProfileDocumentStorage {
+    private let defaults: UserDefaults
+    private let key: String
+    init(defaults: UserDefaults, key: String) { self.defaults = defaults; self.key = key }
+    func readDocument() -> Data? { defaults.data(forKey: key) }
+    func writeDocument(_ data: Data) throws {
+        defaults.set(data, forKey: key)
+        // Ordinary settings need no explicit synchronization. Here cleanup of
+        // the previous secure snapshot requires a disk-commit fence: Apple
+        // documents true as successful disk persistence of pending updates.
+        guard defaults.synchronize() else { throw SecureProfilePersistenceError.documentWriteFailed }
+    }
+}
+
+private struct ProfileCredentialSnapshot: Codable {
+    private struct Secrets: Codable {
+        let claudeSessionKey: String?
+        let apiSessionKey: String?
+        let cliCredentialsJSON: String?
+        let codexCredentialsJSON: String?
+    }
+    private let profiles: [String: Secrets]
+
+    init(profiles: [Profile]) {
+        self.profiles = profiles.reduce(into: [:]) { result, profile in
+            result[profile.id.uuidString] = Secrets(claudeSessionKey: profile.claudeSessionKey,
+                                                   apiSessionKey: profile.apiSessionKey,
+                                                   cliCredentialsJSON: profile.cliCredentialsJSON,
+                                                   codexCredentialsJSON: profile.codexCredentialsJSON)
+        }
+    }
+
+    func hydrate(_ metadata: [Profile]) throws -> [Profile] {
+        try metadata.map { profile in
+            guard let secrets = profiles[profile.id.uuidString] else { throw SecureProfilePersistenceError.secureReadFailed }
+            var hydrated = profile
+            hydrated.claudeSessionKey = secrets.claudeSessionKey
+            hydrated.apiSessionKey = secrets.apiSessionKey
+            hydrated.cliCredentialsJSON = secrets.cliCredentialsJSON
+            hydrated.codexCredentialsJSON = secrets.codexCredentialsJSON
+            return hydrated
+        }
     }
 }

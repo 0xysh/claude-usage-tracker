@@ -3,112 +3,95 @@ name: Update Homebrew Cask
 on:
   release:
     types: [published]
-  # Releases published by the Release workflow's GITHUB_TOKEN do not emit a
-  # `release: published` event (GitHub recursion guard), so the Release
-  # workflow dispatches this explicitly — and it stays runnable by hand.
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag to update the cask for (e.g. v3.3.0)'
+        description: 'Release tag to update the configured personal tap for'
         required: true
         type: string
 
 jobs:
   update-cask:
+    # Homebrew stays optional until the owner explicitly configures a tap.
+    if: ${{ vars.HOMEBREW_TAP_REPOSITORY != '' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     env:
+      GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+      TAP_REPOSITORY: ${{ vars.HOMEBREW_TAP_REPOSITORY }}
+
     steps:
-      - name: Extract version from tag
-        id: version
+      - name: Validate personal tap and release
         run: |
-          # Extract version from release tag
-          VERSION="${RELEASE_TAG}"
-          VERSION="${VERSION#v}"
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "Version: ${VERSION}"
-
-      - name: Download release artifact
-        run: |
-          # Download the Claude-Usage.zip from the release
-          echo "Downloading from: https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/Claude-Usage.zip"
-
-          curl -L -f -o Claude-Usage.zip \
-            "https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/Claude-Usage.zip"
-
-          # Verify download succeeded
-          if [ ! -f Claude-Usage.zip ]; then
-            echo "Error: Failed to download Claude-Usage.zip"
+          set -euo pipefail
+          if [[ ! "$TAP_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+            echo "::error::HOMEBREW_TAP_REPOSITORY must be an owner/repository name."
             exit 1
           fi
-
-          # Check file size is reasonable (should be > 1MB)
-          FILE_SIZE=$(stat -c%s Claude-Usage.zip 2>/dev/null || stat -f%z Claude-Usage.zip)
-          if [ "$FILE_SIZE" -lt 1000000 ]; then
-            echo "Error: Downloaded file is too small ($FILE_SIZE bytes). Likely an error page."
+          TAP_OWNER=$(printf '%s' "${TAP_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]')
+          FORK_OWNER=$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          if [ "$TAP_OWNER" != "$FORK_OWNER" ]; then
+            echo "::error::The Homebrew tap must belong to this fork's owner."
             exit 1
           fi
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+(\.[0-9]+){1,3}([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tag must be a version such as v3.3.1."
+            exit 1
+          fi
+          printf 'RELEASE_VERSION=%s\n' "${RELEASE_TAG#v}" >> "$GITHUB_ENV"
 
-          echo "Download successful! Size: $FILE_SIZE bytes"
-
-      - name: Calculate SHA256
-        id: sha256
+      - name: Download and verify our release
         run: |
-          # Calculate SHA256 of the downloaded zip
-          SHA256=$(sha256sum Claude-Usage.zip | awk '{print $1}')
-          echo "sha256=${SHA256}" >> $GITHUB_OUTPUT
-          echo "SHA256: ${SHA256}"
+          set -euo pipefail
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern Claude-Usage.zip --pattern Claude-Usage.zip.sha256
+          sha256sum --check Claude-Usage.zip.sha256
+          RELEASE_SHA256=$(sha256sum Claude-Usage.zip | awk '{print $1}')
+          printf 'RELEASE_SHA256=%s\n' "$RELEASE_SHA256" >> "$GITHUB_ENV"
 
-      - name: Checkout homebrew-claude-usage tap
+      - name: Checkout configured personal tap
         uses: actions/checkout@v4
         with:
-          repository: hamed-elfayome/homebrew-claude-usage
+          repository: ${{ vars.HOMEBREW_TAP_REPOSITORY }}
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
-      - name: Update cask file
+      - name: Update personal cask
+        working-directory: homebrew-tap
         run: |
-          cd homebrew-tap
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
 
-          # Verify cask file exists
-          if [ ! -f Casks/claude-usage-tracker.rb ]; then
-            echo "Error: Cask file not found at Casks/claude-usage-tracker.rb"
-            exit 1
-          fi
+          cask = Path('Casks/claude-usage-tracker.rb')
+          content = cask.read_text()
+          repository = os.environ['GITHUB_REPOSITORY']
+          replacements = {
+              'version': f'version "{os.environ["RELEASE_VERSION"]}"',
+              'sha256': f'sha256 "{os.environ["RELEASE_SHA256"]}"',
+              'url': f'url "https://github.com/{repository}/releases/download/v#{{version}}/Claude-Usage.zip"',
+          }
+          for field, replacement in replacements.items():
+              pattern = rf'(?m)^([ \t]*){field}[ \t]+"[^"\n]*"[ \t]*$'
+              content, count = re.subn(pattern, lambda match: match[1] + replacement, content)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly one {field} field in {cask}; found {count}')
+          cask.write_text(content)
+          PY
 
-          # Update the cask file with new version and SHA256
-          sed -i "s/version \".*\"/version \"${{ steps.version.outputs.version }}\"/" Casks/claude-usage-tracker.rb
-          sed -i "s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.sha256 }}\"/" Casks/claude-usage-tracker.rb
-
-          # Verify changes were made
-          if ! grep -q "version \"${{ steps.version.outputs.version }}\"" Casks/claude-usage-tracker.rb; then
-            echo "Error: Version update failed"
-            exit 1
-          fi
-
-          if ! grep -q "sha256 \"${{ steps.sha256.outputs.sha256 }}\"" Casks/claude-usage-tracker.rb; then
-            echo "Error: SHA256 update failed"
-            exit 1
-          fi
-
-          # Show the changes
-          echo "Updated cask file:"
-          cat Casks/claude-usage-tracker.rb
-
-      - name: Commit and push changes
+      - name: Commit and push personal tap
+        working-directory: homebrew-tap
         run: |
-          cd homebrew-tap
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add Casks/claude-usage-tracker.rb
-          git commit -m "Update claude-usage-tracker to version ${{ steps.version.outputs.version }}"
-          git push
-        env:
-          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-
-      - name: Summary
-        run: |
-          echo "Successfully updated Homebrew cask to version ${{ steps.version.outputs.version }}"
-          echo "SHA256: ${{ steps.sha256.outputs.sha256 }}"
+          if ! git diff --staged --quiet; then
+            git commit -m "Update claude-usage-tracker to version $RELEASE_VERSION"
+            git push
+          fi

@@ -7,6 +7,10 @@ struct ClaudeUsage: Codable, Equatable {
     var sessionLimit: Int
     var sessionPercentage: Double
     var sessionResetTime: Date
+    /// nil preserves older caches; false means the provider did not report this window.
+    var sessionUsageAvailable: Bool? = nil
+
+    var hasSessionUsage: Bool { sessionUsageAvailable ?? true }
 
     /// Returns 0% if the 5-hour session window has expired, otherwise the raw percentage.
     var effectiveSessionPercentage: Double {
@@ -18,6 +22,9 @@ struct ClaudeUsage: Codable, Equatable {
     var weeklyLimit: Int
     var weeklyPercentage: Double
     var weeklyResetTime: Date
+    var weeklyUsageAvailable: Bool? = nil
+
+    var hasWeeklyUsage: Bool { weeklyUsageAvailable ?? true }
 
     // Weekly data (Opus only)
     var opusWeeklyTokensUsed: Int
@@ -37,6 +44,13 @@ struct ClaudeUsage: Codable, Equatable {
     var fableWeeklyTokensUsed: Int
     var fableWeeklyPercentage: Double
     var fableWeeklyResetTime: Date?
+    /// Explicit for new responses; nil retains compatibility with older caches
+    /// that stored only Fable counts, percentages and an optional reset date.
+    var fableUsageAvailable: Bool? = nil
+
+    var hasFableUsage: Bool {
+        fableUsageAvailable ?? (fableWeeklyPercentage > 0 || fableWeeklyTokensUsed > 0 || fableWeeklyResetTime != nil)
+    }
 
     // Extra usage data
     var costUsed: Double?
@@ -134,11 +148,14 @@ enum UsageStatusLevel {
 extension ClaudeUsage {
     private enum CodingKeys: String, CodingKey {
         case sessionTokensUsed, sessionLimit, sessionPercentage, sessionResetTime
+        case sessionUsageAvailable
         case weeklyTokensUsed, weeklyLimit, weeklyPercentage, weeklyResetTime
+        case weeklyUsageAvailable
         case opusWeeklyTokensUsed, opusWeeklyPercentage
         case sonnetWeeklyTokensUsed, sonnetWeeklyPercentage, sonnetWeeklyResetTime
         case designWeeklyTokensUsed, designWeeklyPercentage, designWeeklyResetTime
         case fableWeeklyTokensUsed, fableWeeklyPercentage, fableWeeklyResetTime
+        case fableUsageAvailable
         case costUsed, costLimit, costCurrency
         case overageBalance, overageBalanceCurrency
         case planType, creditsBalance, creditsUnlimited
@@ -152,10 +169,14 @@ extension ClaudeUsage {
             sessionLimit: try c.decodeIfPresent(Int.self, forKey: .sessionLimit) ?? 0,
             sessionPercentage: try c.decodeIfPresent(Double.self, forKey: .sessionPercentage) ?? 0,
             sessionResetTime: try c.decodeIfPresent(Date.self, forKey: .sessionResetTime) ?? Date(),
+            sessionUsageAvailable: try c.decodeIfPresent(Bool.self, forKey: .sessionUsageAvailable)
+                ?? (c.contains(.sessionPercentage) ? nil : false),
             weeklyTokensUsed: try c.decodeIfPresent(Int.self, forKey: .weeklyTokensUsed) ?? 0,
             weeklyLimit: try c.decodeIfPresent(Int.self, forKey: .weeklyLimit) ?? 0,
             weeklyPercentage: try c.decodeIfPresent(Double.self, forKey: .weeklyPercentage) ?? 0,
             weeklyResetTime: try c.decodeIfPresent(Date.self, forKey: .weeklyResetTime) ?? Date(),
+            weeklyUsageAvailable: try c.decodeIfPresent(Bool.self, forKey: .weeklyUsageAvailable)
+                ?? (c.contains(.weeklyPercentage) ? nil : false),
             opusWeeklyTokensUsed: try c.decodeIfPresent(Int.self, forKey: .opusWeeklyTokensUsed) ?? 0,
             opusWeeklyPercentage: try c.decodeIfPresent(Double.self, forKey: .opusWeeklyPercentage) ?? 0,
             sonnetWeeklyTokensUsed: try c.decodeIfPresent(Int.self, forKey: .sonnetWeeklyTokensUsed) ?? 0,
@@ -167,6 +188,7 @@ extension ClaudeUsage {
             fableWeeklyTokensUsed: try c.decodeIfPresent(Int.self, forKey: .fableWeeklyTokensUsed) ?? 0,
             fableWeeklyPercentage: try c.decodeIfPresent(Double.self, forKey: .fableWeeklyPercentage) ?? 0,
             fableWeeklyResetTime: try c.decodeIfPresent(Date.self, forKey: .fableWeeklyResetTime),
+            fableUsageAvailable: try c.decodeIfPresent(Bool.self, forKey: .fableUsageAvailable),
             costUsed: try c.decodeIfPresent(Double.self, forKey: .costUsed),
             costLimit: try c.decodeIfPresent(Double.self, forKey: .costLimit),
             costCurrency: try c.decodeIfPresent(String.self, forKey: .costCurrency),
@@ -175,7 +197,7 @@ extension ClaudeUsage {
             planType: try c.decodeIfPresent(String.self, forKey: .planType),
             creditsBalance: try c.decodeIfPresent(Double.self, forKey: .creditsBalance),
             creditsUnlimited: try c.decodeIfPresent(Bool.self, forKey: .creditsUnlimited),
-            lastUpdated: try c.decodeIfPresent(Date.self, forKey: .lastUpdated) ?? Date(),
+            lastUpdated: try c.decodeIfPresent(Date.self, forKey: .lastUpdated) ?? .distantPast,
             userTimezone: try c.decodeIfPresent(TimeZone.self, forKey: .userTimezone) ?? .current
         )
     }

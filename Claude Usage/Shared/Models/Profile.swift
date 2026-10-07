@@ -30,6 +30,10 @@ struct Profile: Codable, Identifiable, Equatable {
     /// the Keychain, excluded from the plist like the other credential fields.
     var codexCredentialsJSON: String?
 
+    /// Nonsecret account identity verified by a successful active-profile
+    /// connection to Codex's shared auth file. Keeps background reads isolated.
+    var codexAccountID: String?
+
     // MARK: - CLI Account Sync Metadata
     var hasCliAccount: Bool
     var cliAccountSyncedAt: Date?
@@ -89,6 +93,7 @@ struct Profile: Codable, Identifiable, Equatable {
         apiSessionKeyExpiry: Date? = nil,
         cliCredentialsJSON: String? = nil,
         codexCredentialsJSON: String? = nil,
+        codexAccountID: String? = nil,
         hasCliAccount: Bool = false,
         cliAccountSyncedAt: Date? = nil,
         customKeychainServiceName: String? = nil,
@@ -115,6 +120,7 @@ struct Profile: Codable, Identifiable, Equatable {
         self.apiSessionKeyExpiry = apiSessionKeyExpiry
         self.cliCredentialsJSON = cliCredentialsJSON
         self.codexCredentialsJSON = codexCredentialsJSON
+        self.codexAccountID = codexAccountID
         self.hasCliAccount = hasCliAccount
         self.cliAccountSyncedAt = cliAccountSyncedAt
         self.customKeychainServiceName = customKeychainServiceName
@@ -146,6 +152,7 @@ struct Profile: Codable, Identifiable, Equatable {
         case apiSessionKey, apiOrganizationId, apiSessionKeyExpiry
         case cliCredentialsJSON
         case codexCredentialsJSON
+        case codexAccountID
         case hasCliAccount, cliAccountSyncedAt
         case customKeychainServiceName
         case terminalLauncherSlug
@@ -175,6 +182,7 @@ struct Profile: Codable, Identifiable, Equatable {
         apiSessionKeyExpiry = try c.decodeIfPresent(Date.self, forKey: .apiSessionKeyExpiry)
         cliCredentialsJSON = try c.decodeIfPresent(String.self, forKey: .cliCredentialsJSON)
         codexCredentialsJSON = try c.decodeIfPresent(String.self, forKey: .codexCredentialsJSON)
+        codexAccountID = try c.decodeIfPresent(String.self, forKey: .codexAccountID)
         hasCliAccount = try c.decodeIfPresent(Bool.self, forKey: .hasCliAccount) ?? false
         cliAccountSyncedAt = try c.decodeIfPresent(Date.self, forKey: .cliAccountSyncedAt)
         customKeychainServiceName = try c.decodeIfPresent(String.self, forKey: .customKeychainServiceName)
@@ -200,6 +208,7 @@ struct Profile: Codable, Identifiable, Equatable {
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
         try c.encode(provider, forKey: .provider)
+        try c.encodeIfPresent(codexAccountID, forKey: .codexAccountID)
         // Credentials live in the Keychain (per-profile items), NOT in the plist.
         // The plist on disk is world-readable cleartext — see #267.
         if (encoder.userInfo[Profile.includeSecretsKey] as? Bool) == true {

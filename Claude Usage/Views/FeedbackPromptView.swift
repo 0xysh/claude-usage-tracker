@@ -8,21 +8,9 @@
 //
 
 import SwiftUI
+import AppKit
 
-// ─────────────────────────────────────────────────────────────────────
-// IMPORTANT — Analytics-only endpoint (NO credentials involved)
-// ─────────────────────────────────────────────────────────────────────
-//
-// The URL below is a lightweight Cloudflare Worker that **only** records
-// anonymous, voluntary feedback submitted by the user.
-//
-// • It does NOT receive, store, or process any user credentials.
-// • It does NOT collect data automatically — only when the user clicks Submit.
-// • It is completely separate from the Claude AI / Anthropic APIs.
-//
-// Domain: claude-usage-tracker.hamedelfayome.workers.dev
-// ─────────────────────────────────────────────────────────────────────
-private let kFeedbackEndpoint = "https://claude-usage-tracker.hamedelfayome.workers.dev?type=improve"
+// Feedback opens a browser draft in this fork. The user reviews and publishes it.
 
 /// Role options for the feedback form
 enum FeedbackRole: String, CaseIterable {
@@ -45,31 +33,31 @@ enum FeedbackRole: String, CaseIterable {
     }
 }
 
-/// Feedback collection popup view — matches the GitHubStarPromptView style
+/// Feedback draft popup view — matches the GitHubStarPromptView style.
 struct FeedbackPromptView: View {
+    // Retained for existing callers. Opening a draft must not mark feedback submitted.
     let onSubmit: (_ name: String, _ role: String, _ contact: String, _ message: String) -> Void
     let onRemindLater: () -> Void
     let onDontAskAgain: () -> Void
 
-    @State private var name = ""
     @State private var selectedRole: FeedbackRole = .developer
-    @State private var email = ""
     @State private var message = ""
-    @State private var isSubmitting = false
-    @State private var showThanks = false
+    @State private var showDraftOpened = false
+    @State private var showOpenError = false
+    @State private var openErrorMessageKey = "feedback.error_message"
+    @State private var offersManualDraft = false
 
     @State private var isHoveringSubmit = false
     @State private var isHoveringRemind = false
 
     private var canSubmit: Bool {
-        !name.trimmingCharacters(in: .whitespaces).isEmpty &&
-        !email.trimmingCharacters(in: .whitespaces).isEmpty
+        !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if showThanks {
-                thanksContent
+            if showDraftOpened {
+                draftOpenedContent
             } else {
                 formContent
             }
@@ -84,6 +72,11 @@ struct FeedbackPromptView: View {
                 .stroke(Color.secondary.opacity(0.15), lineWidth: 0.5)
         )
         .shadow(color: .black.opacity(0.15), radius: 15, x: 0, y: 5)
+        .alert("feedback.error_title".localized, isPresented: $showOpenError) {
+            Button("common.ok".localized, role: .cancel) {}
+        } message: {
+            Text(openErrorMessageKey.localized)
+        }
     }
 
     // MARK: - Form
@@ -110,20 +103,6 @@ struct FeedbackPromptView: View {
 
             // Fields
             VStack(spacing: 10) {
-                // Name
-                TextField("feedback.name_placeholder".localized, text: $name)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .padding(8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color(nsColor: .textBackgroundColor))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.secondary.opacity(0.2), lineWidth: 0.5)
-                    )
-
                 // Role picker
                 HStack {
                     Text("feedback.title_label".localized)
@@ -147,20 +126,6 @@ struct FeedbackPromptView: View {
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.secondary.opacity(0.2), lineWidth: 0.5)
                 )
-
-                // Contact
-                TextField("feedback.contact_placeholder".localized, text: $email)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .padding(8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color(nsColor: .textBackgroundColor))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.secondary.opacity(0.2), lineWidth: 0.5)
-                    )
 
                 // Message
                 TextEditor(text: $message)
@@ -189,6 +154,17 @@ struct FeedbackPromptView: View {
             }
             .padding(.horizontal, 20)
 
+            Text("feedback.public_issue_notice".localized)
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 20)
+
+            if offersManualDraft {
+                Button("feedback.open_empty_draft".localized, action: openEmptyDraft)
+                    .font(.system(size: 11))
+            }
+
             // Buttons
             HStack(spacing: 8) {
                 Button(action: onRemindLater) {
@@ -205,16 +181,11 @@ struct FeedbackPromptView: View {
                 .buttonStyle(.plain)
                 .onHover { isHoveringRemind = $0 }
 
-                Button(action: handleSubmit) {
+                Button(action: openDraft) {
                     HStack(spacing: 5) {
-                        if isSubmitting {
-                            ProgressView()
-                                .controlSize(.mini)
-                        } else {
-                            Image(systemName: "paperplane.fill")
-                                .font(.system(size: 10))
-                        }
-                        Text(isSubmitting ? "feedback.submitting".localized : "feedback.submit".localized)
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.system(size: 10))
+                        Text("feedback.submit".localized)
                             .font(.system(size: 11, weight: .semibold))
                     }
                     .foregroundColor(.white)
@@ -226,7 +197,7 @@ struct FeedbackPromptView: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .disabled(isSubmitting || !canSubmit)
+                .disabled(!canSubmit)
                 .opacity(canSubmit ? 1.0 : 0.5)
                 .onHover { isHoveringSubmit = $0 }
             }
@@ -244,16 +215,27 @@ struct FeedbackPromptView: View {
         }
     }
 
-    // MARK: - Thanks
+    // MARK: - Browser Draft
 
-    private var thanksContent: some View {
+    private var draftOpenedContent: some View {
         VStack(spacing: 14) {
-            Image(systemName: "heart.fill")
+            Image(systemName: "arrow.up.right.square")
                 .font(.system(size: 24))
                 .foregroundColor(.accentColor)
 
-            Text("feedback.thanks".localized)
+            Text("feedback.draft_opened".localized)
                 .font(.system(size: 13, weight: .semibold))
+
+            Text("feedback.draft_opened_desc".localized)
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("feedback.edit_draft".localized) {
+                showDraftOpened = false
+            }
+            .font(.system(size: 11))
 
             Button(action: onRemindLater) {
                 Text("common.close".localized)
@@ -271,51 +253,43 @@ struct FeedbackPromptView: View {
         .padding(24)
     }
 
-    // MARK: - Submit
+    // MARK: - Open Draft
 
-    private func handleSubmit() {
-        guard !isSubmitting else { return }
-        isSubmitting = true
-
-        let payload: [String: String] = [
-            "name": name,
-            "role": selectedRole.rawValue,
-            "email": email,
-            "message": message
-        ]
-
-        Task {
-            do {
-                guard let url = URL(string: kFeedbackEndpoint) else { return }
-
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.timeoutInterval = 15
-                request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-
-                let (_, response) = try await URLSession.shared.data(for: request)
-
-                await MainActor.run {
-                    isSubmitting = false
-                    if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            showThanks = true
-                        }
-                        onSubmit(name, selectedRole.rawValue, email, message)
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    isSubmitting = false
-                    // Still count as submitted to not annoy user
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showThanks = true
-                    }
-                    onSubmit(name, selectedRole.rawValue, email, message)
-                }
+    private func openDraft() {
+        guard canSubmit else { return }
+        let result = FeedbackIssueURL.makeDraftURL(
+            repositoryURL: Constants.GitHub.repoURL,
+            role: selectedRole.rawValue,
+            message: message
+        )
+        switch result {
+        case .failure(.tooLong):
+            openErrorMessageKey = "feedback.draft_too_long"
+            offersManualDraft = true
+            showOpenError = true
+        case .failure:
+            openErrorMessageKey = "feedback.error_message"
+            showOpenError = true
+        case .success(let url):
+            guard NSWorkspace.shared.open(url) else {
+                openErrorMessageKey = "feedback.error_message"
+                showOpenError = true
+                return
+            }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showDraftOpened = true
             }
         }
+    }
+
+    private func openEmptyDraft() {
+        guard let url = URL(string: Constants.GitHub.repoURL + "/issues/new"),
+              NSWorkspace.shared.open(url) else {
+            openErrorMessageKey = "feedback.error_message"
+            showOpenError = true
+            return
+        }
+        // Keep the form and its message available for the user's manual paste.
     }
 }
 
@@ -323,7 +297,7 @@ struct FeedbackPromptView: View {
 
 #Preview {
     FeedbackPromptView(
-        onSubmit: { _, _, _, _ in print("Submitted") },
+        onSubmit: { _, _, _, _ in },
         onRemindLater: { print("Remind later") },
         onDontAskAgain: { print("Don't ask again") }
     )

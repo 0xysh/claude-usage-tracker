@@ -43,7 +43,7 @@ final class TerminalLauncherServiceTests: XCTestCase {
 
         let script = service.scriptURL(forSlug: slug)
         let content = try String(contentsOf: script, encoding: .utf8)
-        XCTAssertTrue(content.contains("CLAUDE_CONFIG_DIR=\"\(service.configDirectory(forSlug: slug).path)\""))
+        XCTAssertTrue(content.contains("CLAUDE_CONFIG_DIR='\(service.configDirectory(forSlug: slug).path)'"))
         XCTAssertTrue(content.contains(profile.id.uuidString), "marker must identify the owning profile")
         XCTAssertTrue(content.contains("exec claude \"$@\""))
 
