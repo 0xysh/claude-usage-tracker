@@ -108,9 +108,9 @@ No asset is synthesized or recolored.
   pulse or prove cancellation midway. Geometry/static policy tests and source
   review cover those paths; system Reduce Motion was not changed for testing.
 
-### Installed artifact
+### Initial motion/branding artifact (superseded)
 
-The signed app from source commit `8b8c08716a4e431e4e65305baaa9171c92c4a559` is installed in
+The signed app from source commit `8b8c08716a4e431e4e65305baaa9171c92c4a559` was installed in
 `/Applications/Claude Usage.app`; its exact executable was observed running
 (PID 82167). Strict nested signature verification and x86_64/arm64 slices passed.
 Installed and packaged executable hashes match: `4c6bd63af2531861a76a637f2690080c5fa315be7aa997c42f970c69d43a9035`.
@@ -160,5 +160,50 @@ The final isolated local test run passes **379 of 381 tests**, with **0 failures
 and the same **2 unsigned Keychain skips**. Result:
 `build/local-ci.3icmGJ/TestResults.xcresult`. It includes all 27 motion/palette/
 rendering tests and preserves the previously qualified provider behavior.
-Optimized universal Release and signed installation are recorded below once
-packaging completes.
+Debug and optimized universal Release both passed. The exact result summary
+reports 381 total, 379 passed, 0 failed and 2 skipped; the skips are the unsigned
+`ProfileKeychainMigrationTests.testFieldsAreIsolatedPerProfileAndField` and
+`testProfileSecretRoundTrip` cases, not verified signed Keychain round trips.
+
+### Final counting/title artifact and installed integration proof
+
+The final personal app was packaged from application source commit
+`97cf6fd58c6557ea3f9504a6467ab2ebdf5e5132` and installed at
+`/Applications/Claude Usage.app`. The elevated delivery completed strict nested
+signature verification, Apple Development signing with hardened runtime, and
+launch verification. Its identity is `com.0xysh.ClaudeUsage`, team `K739254VXU`,
+with `x86_64 arm64` slices. The installed and packaged executable SHA-256 is
+identical: `e060734b7980600f5928a1c058163cb214432465a7327c2b29641ae627b9ec36`.
+ZIP SHA-256: `96e7ce2733614f8b634f91d32389a173728f8be0791f21550f27564ea469fa6c`.
+Delivery log: `/private/tmp/claude-polish-audit/install-counting-labels-final.log`.
+The fresh elevated installed-artifact check also passed, validating Sparkle's
+nested components and the app's on-disk signature/designated requirement:
+`/private/tmp/claude-polish-audit/current-installed-signature.log`.
+The previous installation remains at
+`release/personal/backups/install-20261007-120615-PFwgWG`.
+
+The actual installed executable (PID 86045) produced its own popup (window 3350)
+after restart. The captured opening sequence proves real intermediate counting
+and synchronized fill: frame 0 shows Codex **3%**, Claude weekly **30%** and
+Extra Usage **22%**; frame 1 shows **8% / 65% / 49%**; frame 5 settles sharply
+at **13% / 100% / 75%**. Claude's measured session and Fable **0%** stay sharp.
+The plain quota titles, original marks, inline credits, omitted absent Codex
+session and both accounts' controls remain visible together. Evidence:
+`/private/tmp/claude-polish-audit/installed-counting-reopen/frame-{0,1,5}.png`.
+`timings.json` in that directory records capture starts at 0.256, 0.422 and
+1.018 seconds; captures themselves take about 0.12 seconds, so these are not
+exact animation-frame timestamps.
+
+Own-window captures use the gray vibrancy fallback. The actual dark on-screen
+appearance is captured at
+`/private/tmp/claude-polish-audit/installed-counting-labels-final.png`.
+Earlier reopen captures showed only endpoints because reopening an already
+visible dashboard intentionally leaves it open; restart/open capture supplied
+the missing integration evidence without changing that behavior.
+
+The ignored `release/personal/BUILD-RECEIPT.md` records the exact delivery.
+Xcode 27 beta `27A5228h` remains non-parity with Actions' unavailable Xcode
+26.0.1; no Actions run was started. Apple Development signing is not public
+notarization. Native Reduce Motion policy and bounded
+cancellation still rely on tests/source review; the system preference was not
+changed and midway rendered-frame cancellation was not claimed.

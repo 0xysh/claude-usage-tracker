@@ -231,6 +231,32 @@ synchronized with the fill, with exact sharp endpoints and static zero/unknown
 readings. Weekly capsule tags are replaced by localized regular titles:
 5-hour limit, Weekly, Weekly - all models and Weekly - Fable. All 14 existing
 languages retain their existing entries; new model-specific weekly titles follow
-the same convention. The final exact-state suite passes 379 of 381 tests,
-with 0 failures and the same two unsigned Keychain skips. Native evidence and
-final artifact details remain in USAGE-DESIGN-AND-MOTION.md.
+the same convention. The final exact-state suite at
+`build/local-ci.3icmGJ/TestResults.xcresult` passes 379 of 381 tests,
+with 0 failures and the same two unsigned Keychain skips. Debug and optimized
+universal Release pass on Xcode 27 beta `27A5228h`; this remains non-parity with
+the unavailable Xcode 26.0.1 Actions toolchain. No new Actions run was started.
+
+The final counting/title app from source
+`97cf6fd58c6557ea3f9504a6467ab2ebdf5e5132` was personally signed, installed and
+observed running. Elevated packaging passed strict nested signature verification;
+the installed/package executable SHA-256 matches:
+`e060734b7980600f5928a1c058163cb214432465a7327c2b29641ae627b9ec36`.
+ZIP SHA-256: `96e7ce2733614f8b634f91d32389a173728f8be0791f21550f27564ea469fa6c`.
+The delivery log is `/private/tmp/claude-polish-audit/install-counting-labels-final.log`.
+Fresh elevated strict verification of the exact installed app and nested Sparkle
+components also passes in `/private/tmp/claude-polish-audit/current-installed-signature.log`.
+
+An opening capture of the actual installed popup (PID 86045, own window 3350)
+now confirms the counter/fill integration: Codex/Claude weekly/Extra Usage move
+through **3/30/22%**, then **8/65/49%**, to sharp **13/100/75%** endpoints.
+Measured session and Fable zero remain sharp, and both cards fit. The earlier
+endpoint-only captures came from reopening an already visible popup; reopening
+intentionally leaves it visible, so restart/open capture was required.
+Evidence is `/private/tmp/claude-polish-audit/installed-counting-reopen/`;
+its timings record capture starts, not precise rendered-frame timestamps.
+Own-window capture has gray vibrancy fallback; the actual dark appearance is
+recorded separately in `installed-counting-labels-final.png`.
+Native evidence, current artifact details and remaining Reduce Motion/cancellation
+verification limits are in USAGE-DESIGN-AND-MOTION.md and the ignored personal
+build receipt. Personal signing does not constitute public notarization.
