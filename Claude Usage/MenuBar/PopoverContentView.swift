@@ -58,6 +58,7 @@ struct PopoverContentView: View {
     @ObservedObject var manager: MenuBarManager
     let onRefresh: () -> Void
     let onPreferences: () -> Void
+    var onContentHeightChanged: ((CGFloat) -> Void)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showInsights = false
@@ -117,7 +118,8 @@ struct PopoverContentView: View {
                     onRefresh: onRefresh,
                     onPreferences: onPreferences,
                     onRefreshProfile: manager.refreshProfile,
-                    onConfigureProfile: manager.configureProfile
+                    onConfigureProfile: manager.configureProfile,
+                    onContentHeightChanged: onContentHeightChanged
                 )
                 .background(VisualEffectBackground())
             } else {

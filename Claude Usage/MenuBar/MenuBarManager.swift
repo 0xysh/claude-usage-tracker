@@ -555,6 +555,20 @@ class MenuBarManager: NSObject, ObservableObject {
         return hostingController
     }
 
+    private func resizeDetachedDashboard(_ window: NSWindow, to height: CGFloat) {
+        guard detachedWindow === window, height.isFinite, height > 0 else { return }
+        let current = window.contentRect(forFrameRect: window.frame).size
+        guard abs(current.height - height) >= 1 else { return }
+        // Detached hosting deliberately has no preferred-size tracking. Keep that
+        // contract and update only its measured content height, without animation.
+        let content = NSRect(origin: .zero, size: NSSize(width: current.width, height: height))
+        let size = window.frameRect(forContentRect: content).size
+        var frame = window.frame
+        frame.origin.y = frame.maxY - size.height
+        frame.size = size
+        window.setFrame(frame, display: true, animate: false)
+    }
+
     func showDashboard() {
         if let detachedWindow, detachedWindow.isVisible {
             detachedWindow.makeKeyAndOrderFront(nil)
@@ -1960,20 +1974,6 @@ extension MenuBarManager: NSPopoverDelegate {
         // Stop monitoring for outside clicks when detaching
         stopMonitoringForOutsideClicks()
 
-        // Create content view controller sized for a window (not a popover).
-        // We don't use createContentViewController() here because its
-        // preferredContentSize/sizingOptions (added by PR #200 for popover
-        // positioning) conflict with the window's layout constraints.
-        let contentView = PopoverContentView(
-            manager: self,
-            onRefresh: { [weak self] in self?.refreshUsage() },
-            onPreferences: { [weak self] in
-                self?.closePopoverOrWindow()
-                self?.preferencesClicked()
-            }
-        )
-        let hostingController = NSHostingController(rootView: contentView)
-
         let size = SharedDataStore.shared.loadPopoverShowAllProfiles()
             ? NSSize(width: 360, height: min(680, max(320, (NSScreen.main?.visibleFrame.height ?? 800) - 120)))
             : NSSize(width: 280, height: 600)
@@ -1983,7 +1983,6 @@ extension MenuBarManager: NSPopoverDelegate {
             backing: .buffered,
             defer: false
         )
-        window.contentViewController = hostingController
         window.title = ""
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
@@ -1999,6 +1998,24 @@ extension MenuBarManager: NSPopoverDelegate {
 
         // Store reference to the detached window
         detachedWindow = window
+
+        // Detached hosting deliberately omits preferredContentSize/sizingOptions:
+        // tracking those conflicts with the panel's own layout constraints.
+        // A late measurement may only resize the panel that owns this content.
+        let contentView = PopoverContentView(
+            manager: self,
+            onRefresh: { [weak self] in self?.refreshUsage() },
+            onPreferences: { [weak self] in
+                self?.closePopoverOrWindow()
+                self?.preferencesClicked()
+            },
+            onContentHeightChanged: { [weak self, weak window] height in
+                guard let window else { return }
+                self?.resizeDetachedDashboard(window, to: height)
+            }
+        )
+        let hostingController = NSHostingController(rootView: contentView)
+        window.contentViewController = hostingController
 
         return window
     }

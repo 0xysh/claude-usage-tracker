@@ -11,9 +11,15 @@ struct CombinedUsageView: View {
     let onPreferences: () -> Void
     var onRefreshProfile: ((UUID) -> Void)? = nil
     var onConfigureProfile: ((UUID) -> Void)? = nil
+    var onContentHeightChanged: ((CGFloat) -> Void)? = nil
+    @State private var measuredHeights = DashboardHeights()
 
     private var availableHeight: CGFloat {
         min(680, max(320, (NSScreen.main?.visibleFrame.height ?? 800) - 120))
+    }
+
+    private var fittedHeight: CGFloat {
+        measuredHeights.isValid ? min(availableHeight, measuredHeights.total) : availableHeight
     }
 
     private var percentageDisplay: Binding<Bool> {
@@ -33,6 +39,65 @@ struct CombinedUsageView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            header
+            .fixedSize(horizontal: false, vertical: true)
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(key: DashboardHeightPreference.self,
+                                           value: DashboardHeights(header: geometry.size.height))
+                }
+            }
+
+            ScrollView {
+                VStack(spacing: 12) {
+                    if profiles.isEmpty {
+                        Text("Select accounts in Manage Profiles to see their usage together.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .padding(20)
+                    }
+                    ForEach(profiles) { profile in
+                        ProfileUsageCard(
+                            profile: profile,
+                            error: errors[profile.id],
+                            showRemaining: profileManager.multiProfileConfig.showRemainingPercentage,
+                            isRefreshing: isRefreshing,
+                            isRefreshingThisProfile: refreshingProfileIDs.contains(profile.id),
+                            onRefresh: {
+                                if let onRefreshProfile { onRefreshProfile(profile.id) } else { onRefresh() }
+                            },
+                            onPreferences: {
+                                if let onConfigureProfile { onConfigureProfile(profile.id) } else { onPreferences() }
+                            }
+                        )
+                    }
+                }
+                .padding(12)
+                .fixedSize(horizontal: false, vertical: true)
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.preference(key: DashboardHeightPreference.self,
+                                               value: DashboardHeights(cards: geometry.size.height))
+                    }
+                }
+            }
+        }
+        .frame(width: 360, height: fittedHeight)
+        .onPreferenceChange(DashboardHeightPreference.self) { heights in
+            guard heights.isValid else { return }
+            let normalized = heights.roundedUp
+            guard normalized != measuredHeights else { return }
+            // The intrinsic card stack is independent of the scroll viewport.
+            // Resize without animating the native window; quota motion stays intact.
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { measuredHeights = normalized }
+            onContentHeightChanged?(min(availableHeight, normalized.total))
+        }
+    }
+
+    private var header: some View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
@@ -63,35 +128,26 @@ struct CombinedUsageView: View {
             .padding(.bottom, 12)
 
             Divider()
-
-            ScrollView {
-                VStack(spacing: 12) {
-                    if profiles.isEmpty {
-                        Text("Select accounts in Manage Profiles to see their usage together.")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            .padding(20)
-                    }
-                    ForEach(profiles) { profile in
-                        ProfileUsageCard(
-                            profile: profile,
-                            error: errors[profile.id],
-                            showRemaining: profileManager.multiProfileConfig.showRemainingPercentage,
-                            isRefreshing: isRefreshing,
-                            isRefreshingThisProfile: refreshingProfileIDs.contains(profile.id),
-                            onRefresh: {
-                                if let onRefreshProfile { onRefreshProfile(profile.id) } else { onRefresh() }
-                            },
-                            onPreferences: {
-                                if let onConfigureProfile { onConfigureProfile(profile.id) } else { onPreferences() }
-                            }
-                        )
-                    }
-                }
-                .padding(12)
-            }
         }
-        .frame(width: 360, height: availableHeight)
+    }
+}
+
+private struct DashboardHeights: Equatable {
+    var header: CGFloat = 0
+    var cards: CGFloat = 0
+
+    var isValid: Bool { header.isFinite && cards.isFinite && header > 0 && cards > 0 }
+    var total: CGFloat { header + cards }
+    var roundedUp: Self { Self(header: ceil(header), cards: ceil(cards)) }
+}
+
+private struct DashboardHeightPreference: PreferenceKey {
+    static let defaultValue = DashboardHeights()
+
+    static func reduce(value: inout DashboardHeights, nextValue: () -> DashboardHeights) {
+        let next = nextValue()
+        value.header = max(value.header, next.header)
+        value.cards = max(value.cards, next.cards)
     }
 }
 
