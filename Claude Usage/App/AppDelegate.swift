@@ -287,6 +287,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         return false
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Opening the installed app again should reveal its interface, even
+        // when it has only a menu-bar item and no Dock window.
+        if let menuBarManager {
+            menuBarManager.showDashboard()
+        } else {
+            setupWindow?.makeKeyAndOrderFront(nil)
+        }
+        return true
+    }
+
     func application(_ application: NSApplication, willEncodeRestorableState coder: NSCoder) {
         // Prevent window restoration state from being saved
     }

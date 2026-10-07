@@ -18,6 +18,7 @@ final class NetworkLoggerService: ObservableObject {
     private let maxFileSizeBytes = 10 * 1024 * 1024  // 10MB
     private let requestBodyMaxLength = 2000
     private let responsePreviewMaxLength = 4000
+    private let isTestHost = ProcessInfo.processInfo.environment["CLAUDE_USAGE_UNIT_TEST_HOST"] == "1"
 
     private var storageURL: URL {
         let appSupport = FileManager.default.urls(
@@ -36,7 +37,8 @@ final class NetworkLoggerService: ObservableObject {
     }
 
     private init() {
-        self.session = Self.loadSession() ?? NetworkLoggingSession()
+        self.session = ProcessInfo.processInfo.environment["CLAUDE_USAGE_UNIT_TEST_HOST"] == "1"
+            ? NetworkLoggingSession() : Self.loadSession() ?? NetworkLoggingSession()
 
         // Resume timer if session was active
         if session.isActive, let endTime = session.endTime, endTime > Date() {
@@ -142,6 +144,7 @@ final class NetworkLoggerService: ObservableObject {
     }
 
     private func saveSession() {
+        guard !isTestHost else { return }
         do {
             let data = try JSONEncoder().encode(session)
 

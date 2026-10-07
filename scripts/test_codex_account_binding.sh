@@ -14,18 +14,22 @@ mkdir -p "$bundle/Contents/MacOS"
 cat > "$test_directory/AppDependencies.swift" <<'SWIFT'
 import Foundation
 enum Provider: String, Codable, Equatable { case anthropic, codex }
-struct ClaudeUsage: Codable, Equatable {}
 struct APIUsage: Codable, Equatable {}
 struct MenuBarIconConfiguration: Codable, Equatable { static let `default` = Self() }
 struct NotificationSettings: Codable, Equatable {}
-enum ErrorCode { case providerCredentialsNotFound, providerAuthExpired, providerAuthRefreshFailed, storageEncodingFailed, storageWriteFailed }
+enum ErrorCode { case providerCredentialsNotFound, providerAuthExpired, providerAuthRefreshFailed, storageEncodingFailed, storageWriteFailed, apiParsingFailed, urlMalformed, apiServerError }
 struct AppError: Error {
     let code: ErrorCode
     init(code: ErrorCode, message: String, technicalDetails: String? = nil,
          isRecoverable: Bool, recoverySuggestion: String? = nil) { self.code = code }
 }
 extension String { var localized: String { self } }
-enum Constants { enum APIEndpoints { static let codexTokenRefresh = "https://auth.example.invalid/oauth/token" } }
+enum Constants {
+    enum APIEndpoints {
+        static let codexTokenRefresh = "https://auth.example.invalid/oauth/token"
+        static let codexBase = "https://chatgpt.com/backend-api"
+    }
+}
 final class LoggingService {
     static let shared = LoggingService()
     func logError(_ message: String, error: Error? = nil) {}
@@ -49,12 +53,9 @@ final class ClaudeCodeSyncService {
     static let shared = ClaudeCodeSyncService()
     func isTokenExpired(_ json: String) -> Bool { preconditionFailure("Claude credentials are forbidden") }
 }
-final class CodexAPIService {
-    static let shared = CodexAPIService()
-    func fetchUsage(credentials: CodexCredentials) async throws -> CodexUsageResponse {
-        preconditionFailure("Inject synthetic usage transport")
-    }
-    static func mapToUsage(_ response: CodexUsageResponse, previous: ClaudeUsage?) -> ClaudeUsage { ClaudeUsage() }
+final class SharedDataStore {
+    static let shared = SharedDataStore()
+    func uses24HourTime() -> Bool { false }
 }
 SWIFT
 
@@ -69,10 +70,14 @@ xcrun swiftc -emit-library -emit-module -enable-testing -module-name Claude_Usag
     -module-cache-path "$test_directory/module-cache" \
     -emit-module-path "$test_directory/Claude_Usage.swiftmodule" \
     "$test_directory/AppDependencies.swift" \
+    "$repo_root/Claude Usage/Shared/Models/ClaudeUsage.swift" \
     "$repo_root/Claude Usage/Shared/Models/Profile.swift" \
+    "$repo_root/Claude Usage/Shared/Extensions/Date+Extensions.swift" \
     "$repo_root/Claude Usage/Shared/Protocols/UsageProviderService.swift" \
+    "$repo_root/Claude Usage/Shared/Utilities/UsagePollingRequest.swift" \
     "$repo_root/Claude Usage/Shared/Services/Providers/Codex/CodexAuthService.swift" \
     "$repo_root/Claude Usage/Shared/Services/Providers/Codex/CodexAPIService+Types.swift" \
+    "$repo_root/Claude Usage/Shared/Services/Providers/Codex/CodexAPIService.swift" \
     "$repo_root/Claude Usage/Shared/Services/Providers/Codex/CodexUsageProvider.swift" \
     -o "$test_directory/libClaude_Usage.dylib"
 

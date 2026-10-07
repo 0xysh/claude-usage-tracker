@@ -270,13 +270,17 @@ class ProfileManager: ObservableObject {
             LoggingService.shared.log("⚠️ Profile '\(updatedProfile.name)' has no CLI credentials JSON")
         }
 
-        // Update last used timestamp
-        var updated = updatedProfile
-        updated.lastUsedAt = Date()
-
-        if let index = profiles.firstIndex(where: { $0.id == updatedProfile.id }) {
-            profiles[index] = updated
+        // The refresh above can persist rotated credentials and reload profiles.
+        // Commit the latest target instead of restoring its pre-refresh snapshot.
+        guard let index = profiles.firstIndex(where: { $0.id == id }) else {
+            LoggingService.shared.log("Profile no longer exists after credential refresh: \(id)")
+            switchingSemaphore = false
+            isSwitchingProfile = false
+            return
         }
+        var updated = profiles[index]
+        updated.lastUsedAt = Date()
+        profiles[index] = updated
 
         activeProfile = updated
         guard persistProfiles() else {
@@ -308,7 +312,7 @@ class ProfileManager: ObservableObject {
         switchingSemaphore = false
         isSwitchingProfile = false
 
-        LoggingService.shared.log("Successfully activated profile: \(updatedProfile.name)")
+        LoggingService.shared.log("Successfully activated profile: \(updated.name)")
     }
 
     // MARK: - Credentials

@@ -177,6 +177,9 @@ final class StatusBarUIManager {
     }
 
     func cleanup() {
+        appearanceDebounceTimer?.invalidate()
+        appearanceDebounceTimer = nil
+        lastImageData.removeAll()
         appearanceObservers.forEach { $0.invalidate() }
         appearanceObservers.removeAll()
 
@@ -349,7 +352,7 @@ final class StatusBarUIManager {
     }
 
     /// Updates all multi-profile status items
-    func updateMultiProfileButtons(profiles: [Profile], config: MultiProfileDisplayConfig, activeProfileId: UUID? = nil) {
+    func updateMultiProfileButtons(profiles: [Profile], config: MultiProfileDisplayConfig, activeProfileId: UUID? = nil, errors: [UUID: String] = [:]) {
         guard isMultiProfileMode else { return }
 
         for profile in profiles where profile.isSelectedForDisplay {
@@ -362,19 +365,31 @@ final class StatusBarUIManager {
             let menuBarIsDark = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
 
             // Get usage data for this profile
+            let presentation = MenuBarUsagePresentation(usage: profile.claudeUsage,
+                                                       refreshFailed: errors[profile.id] != nil,
+                                                       showRemaining: config.showRemainingPercentage)
+            let description = presentation.tooltip(profileName: profile.name, showWeek: config.showWeek,
+                                                   error: errors[profile.id])
+            button.toolTip = description
+            button.setAccessibilityLabel(description)
             guard let usage = profile.claudeUsage else {
                 button.title = ""
-                button.image = NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: "No usage data")
-                button.toolTip = "\(profile.name) · No usage data received"
-                statusItem.length = Self.multiProfilePlaceholderLength
+                let image = renderer.createMultiProfilePercentage(
+                    sessionPercentage: nil, weekPercentage: nil, sessionStatus: .safe, weekStatus: .safe,
+                    profileName: config.showProfileLabel ? profile.name : nil,
+                    monochromeMode: true, isDarkMode: menuBarIsDark, showWeek: config.showWeek)
+                image.isTemplate = true
+                let length = MenuBarUsagePresentation.itemLength(imageWidth: image.size.width,
+                                                                 percentageStyle: config.iconStyle == .percentage)
+                if abs(statusItem.length - length) > 0.5 { statusItem.length = length }
+                setButtonImage(button, image: image)
                 continue
             }
             button.title = ""
-            button.toolTip = profile.name
             let showRemaining = config.showRemainingPercentage
 
             // Calculate percentages
-            let sessionUsed = usage.effectiveSessionPercentage
+            let sessionUsed = presentation.state == .fresh ? usage.effectiveSessionPercentage : usage.sessionPercentage
             let weekUsed = usage.weeklyPercentage
 
             let sessionDisplay = UsageStatusCalculator.getDisplayPercentage(
@@ -431,7 +446,8 @@ final class StatusBarUIManager {
 
             // Create icon based on selected style
             let image: NSImage
-            switch config.iconStyle {
+            let missingWindow = presentation.sessionPercentage == nil || (config.showWeek && presentation.weeklyPercentage == nil)
+            switch missingWindow ? .percentage : config.iconStyle {
             case .concentric:
                 if config.showProfileLabel {
                     image = renderer.createConcentricIconWithLabel(
@@ -495,8 +511,8 @@ final class StatusBarUIManager {
                 )
             case .percentage:
                 image = renderer.createMultiProfilePercentage(
-                    sessionPercentage: sessionDisplay,
-                    weekPercentage: config.showWeek ? weekDisplay : nil,
+                    sessionPercentage: presentation.sessionPercentage,
+                    weekPercentage: config.showWeek ? presentation.weeklyPercentage : nil,
                     sessionStatus: sessionStatus,
                     weekStatus: weekStatus,
                     profileName: config.showProfileLabel ? profile.name : nil,
@@ -505,18 +521,21 @@ final class StatusBarUIManager {
                     useSystemColor: false,
                     sessionPaceStatus: sessionPaceStatus,
                     weekPaceStatus: config.showWeek ? weekPaceStatus : nil,
-                    showPaceMarker: config.showPaceMarker
+                    showPaceMarker: config.showPaceMarker && presentation.state == .fresh && !missingWindow,
+                    showWeek: config.showWeek
                 )
             }
 
+            let stateImage = presentation.state == .lastKnown
+                ? renderer.createLastKnownIcon(from: image, isDarkMode: menuBarIsDark) : image
             let finalImage: NSImage
             if profile.id == activeProfileId && config.showActiveProfileIndicator {
-                let underlinedImage = addGreenUnderline(to: image)
+                let underlinedImage = addGreenUnderline(to: stateImage)
                 underlinedImage.isTemplate = false
                 finalImage = underlinedImage
             } else {
-                image.isTemplate = useMonochrome && !config.showPaceMarker
-                finalImage = image
+                stateImage.isTemplate = useMonochrome && !config.showPaceMarker && presentation.state == .fresh
+                finalImage = stateImage
             }
 
             // macOS 26 (Tahoe) crash fix: with NSStatusItem.variableLength, AppKit
@@ -531,11 +550,12 @@ final class StatusBarUIManager {
             // per-pixel width jitter between updates (e.g. "5%" vs "45%") would still
             // crash. Round the width up to a coarse grid so ordinary data changes never
             // move the length, and only assign when it genuinely changes.
-            let stableLength = ceil(finalImage.size.width / 32.0) * 32.0
+            let stableLength = MenuBarUsagePresentation.itemLength(imageWidth: image.size.width,
+                                                                  percentageStyle: config.iconStyle == .percentage || missingWindow)
             if abs(statusItem.length - stableLength) > 0.5 {
                 statusItem.length = stableLength
             }
-            button.image = finalImage
+            setButtonImage(button, image: finalImage)
         }
     }
 
@@ -584,17 +604,26 @@ final class StatusBarUIManager {
     func updateAllButtons(
         usage: ClaudeUsage,
         apiUsage: APIUsage?,
-        usageAvailable: Bool = true
+        usageAvailable: Bool = true,
+        refreshFailed: Bool = false
     ) {
         // Get config from active profile
         let profile = ProfileManager.shared.activeProfile
-        let config = profile?.iconConfig ?? .default
+        var config = profile?.iconConfig ?? .default
+        if SharedDataStore.shared.loadPopoverShowAllProfiles() {
+            config.showRemainingPercentage = ProfileManager.shared.multiProfileConfig.showRemainingPercentage
+        }
+        let presentation = MenuBarUsagePresentation(usage: usageAvailable ? usage : nil,
+                                                   refreshFailed: refreshFailed,
+                                                   showRemaining: config.showRemainingPercentage)
+        let description = presentation.tooltip(profileName: profile?.name ?? "Usage", showWeek: true, error: nil)
 
         if !usageAvailable, !config.enabledMetrics.isEmpty {
             for (metric, item) in statusItems where metric != .api || apiUsage == nil {
                 item.button?.title = ""
                 item.button?.image = NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: "No usage data")
-                item.button?.toolTip = "No usage data received"
+                item.button?.toolTip = description
+                item.button?.setAccessibilityLabel(description)
                 item.length = Self.multiProfilePlaceholderLength
             }
             if apiUsage != nil {
@@ -641,11 +670,28 @@ final class StatusBarUIManager {
                 colorMode: config.colorMode,
                 singleColorHex: config.singleColorHex,
                 showIconName: config.showIconNames,
-                showNextSessionTime: metricConfig.showNextSessionTime
+                showNextSessionTime: metricConfig.showNextSessionTime && presentation.state == .fresh,
+                readingState: presentation.state
             )
 
-            image.isTemplate = config.colorMode == .monochrome && !config.showPaceMarker
-            button.image = image
+            let unavailable = (metricConfig.metricType == .session && !usage.hasSessionUsage)
+                || (metricConfig.metricType == .week && !usage.hasWeeklyUsage)
+            let result: NSImage
+            if unavailable {
+                result = renderer.createMultiProfilePercentage(
+                    sessionPercentage: nil, weekPercentage: nil, sessionStatus: .safe, weekStatus: .safe,
+                    profileName: config.showIconNames ? metricConfig.metricType.displayName : nil,
+                    monochromeMode: true, isDarkMode: menuBarIsDark, showWeek: false)
+                result.isTemplate = true
+            } else if presentation.state == .lastKnown && metricConfig.metricType != .api {
+                result = renderer.createLastKnownIcon(from: image, isDarkMode: menuBarIsDark)
+            } else {
+                image.isTemplate = config.colorMode == .monochrome && !config.showPaceMarker
+                result = image
+            }
+            button.toolTip = description
+            button.setAccessibilityLabel(description)
+            setButtonImage(button, image: result)
         }
     }
 
@@ -661,7 +707,10 @@ final class StatusBarUIManager {
         }
 
         // Get config from active profile
-        let config = ProfileManager.shared.activeProfile?.iconConfig ?? .default
+        var config = ProfileManager.shared.activeProfile?.iconConfig ?? .default
+        if SharedDataStore.shared.loadPopoverShowAllProfiles() {
+            config.showRemainingPercentage = ProfileManager.shared.multiProfileConfig.showRemainingPercentage
+        }
         guard let metricConfig = config.config(for: metricType) else {
             return
         }
@@ -764,10 +813,12 @@ final class StatusBarUIManager {
         // Avoid NSImage.tiffRepresentation: macOS 26 SDK crashes in
         // SetupTIFFErrorHandler dispatch_once. Hash via CGImage bytes instead.
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
-              let newData = cg.dataProvider?.data as Data? else {
+              let pixels = cg.dataProvider?.data as Data? else {
             button.image = image
             return
         }
+        var newData = Data("\(cg.width):\(cg.height):\(image.isTemplate):".utf8)
+        newData.append(pixels)
         if lastImageData[buttonId] == newData { return }
         lastImageData[buttonId] = newData
         button.image = image

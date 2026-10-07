@@ -140,7 +140,7 @@ final class BorderlessSettingsWindow: NSWindow {
 
 /// Builds the settings window — fully borderless, no system titlebar.
 enum SettingsWindowBuilder {
-    static func makeWindow(size: CGSize) -> NSWindow {
+    static func makeWindow(size: CGSize, initialSection: SettingsSection = .appearance) -> NSWindow {
         let window = BorderlessSettingsWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: .borderless,
@@ -149,7 +149,7 @@ enum SettingsWindowBuilder {
         )
 
         let hostingView = NSHostingView(rootView:
-            SettingsView()
+            SettingsView(initialSection: initialSection)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         )
         hostingView.translatesAutoresizingMaskIntoConstraints = false
@@ -209,7 +209,8 @@ struct TrafficLightButton: View {
     private var isActive: Bool { controlActiveState == .key }
 
     var body: some View {
-        Circle()
+        Button(action: performAction) {
+          Circle()
             .fill(isActive ? type.activeColor : Color.primary.opacity(0.15))
             .frame(width: 12, height: 12)
             .overlay {
@@ -219,8 +220,12 @@ struct TrafficLightButton: View {
                         .foregroundColor(.black.opacity(0.5))
                 }
             }
-            .onHover { isHovered = $0 }
-            .onTapGesture { performAction() }
+        }
+        .buttonStyle(.plain)
+        .frame(width: 22, height: 22)
+        .contentShape(Rectangle())
+        .accessibilityLabel(type == .close ? "Close settings" : type == .miniaturize ? "Minimize settings" : "Zoom settings")
+        .onHover { isHovered = $0 }
     }
 
     private func performAction() {
@@ -239,6 +244,10 @@ struct SettingsView: View {
     @StateObject private var profileManager = ProfileManager.shared
     @Environment(\.colorScheme) private var colorScheme
 
+    init(initialSection: SettingsSection = .appearance) {
+        _selectedSection = State(initialValue: initialSection)
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             // Sidebar with Profile Switcher
@@ -253,11 +262,6 @@ struct SettingsView: View {
 
                 // Profile Section (Switcher + Credentials + Settings)
                 ProfileSectionContainer(selectedSection: $selectedSection)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-
-                // Sponsor slot (available placement)
-                SponsorSlotCard()
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
 
@@ -333,6 +337,9 @@ struct SettingsView: View {
         }
         .frame(minWidth: 720, maxWidth: 720, maxHeight: .infinity)
         .background(SettingsBackground())
+        .onReceive(NotificationCenter.default.publisher(for: .settingsSectionRequested)) { notification in
+            if let section = notification.object as? SettingsSection { selectedSection = section }
+        }
     }
 }
 

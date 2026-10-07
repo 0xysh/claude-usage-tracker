@@ -4,7 +4,7 @@ set -euo pipefail
 # Compile the actual auth service in an isolated module, with synthetic stand-ins
 # for app storage/logging. This never loads the app, login stores, or real auth.json.
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
-developer_dir=$(xcode-select -p)
+developer_dir=${DEVELOPER_DIR:-$(xcode-select -p)}
 test_support="$developer_dir/Platforms/MacOSX.platform/Developer"
 test_directory=$(mktemp -d "${TMPDIR:-/tmp}/codex-auth-ownership.XXXXXX")
 trap 'rm -rf "$test_directory"' EXIT
@@ -27,7 +27,7 @@ struct Profile {
     }
 }
 struct AppError: Error {
-    enum Code { case providerCredentialsNotFound, providerAuthExpired, providerAuthRefreshFailed, storageEncodingFailed }
+    enum Code { case providerCredentialsNotFound, providerAuthExpired, providerAuthRefreshFailed, storageEncodingFailed, storageWriteFailed }
     let code: Code
     init(code: Code, message: String, technicalDetails: String? = nil,
          isRecoverable: Bool, recoverySuggestion: String? = nil) { self.code = code }
@@ -50,6 +50,10 @@ final class ProfileManager {
         guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
         profiles[index] = profile
     }
+}
+final class ProfileStore {
+    static let shared = ProfileStore()
+    var lastPersistenceError: Error? { preconditionFailure("Inject synthetic persistence") }
 }
 SWIFT
 

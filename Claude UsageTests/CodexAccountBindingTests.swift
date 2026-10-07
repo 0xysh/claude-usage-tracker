@@ -14,6 +14,11 @@ final class CodexAccountBindingTests: XCTestCase {
     private var allowSave = true
     private var requestFailure: AppError?
     private var afterRequest: (() throws -> Void)?
+    private var responseJSON = """
+    {"plan_type":"plus","rate_limit":{
+      "primary_window":{"used_percent":0,"limit_window_seconds":18000},
+      "secondary_window":{"used_percent":8,"limit_window_seconds":604800}}}
+    """
 
     override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -39,7 +44,7 @@ final class CodexAccountBindingTests: XCTestCase {
                 requestCount += 1
                 try afterRequest?()
                 if let requestFailure { throw requestFailure }
-                return try JSONDecoder().decode(CodexUsageResponse.self, from: Data("{\"plan_type\":\"plus\"}".utf8))
+                return try JSONDecoder().decode(CodexUsageResponse.self, from: Data(responseJSON.utf8))
             },
             profileContext: { [self] in (activeID, profiles) },
             saveProfile: { [self] updated in
@@ -119,6 +124,89 @@ final class CodexAccountBindingTests: XCTestCase {
         await expectFailure(makeProvider(), profile: profile)
         XCTAssertNil(profiles[0].codexAccountID)
         XCTAssertEqual(saveCount, 0)
+    }
+
+    func testResponseWithoutAnyUsageWindowDoesNotBindOrReturnFreshUsage() async {
+        let profile = Profile(name: "Active", provider: .codex)
+        install(profile, active: true)
+        responseJSON = "{\"plan_type\":\"plus\"}"
+        await expectFailure(makeProvider(), profile: profile, code: .apiParsingFailed)
+        XCTAssertNil(profiles[0].codexAccountID)
+        XCTAssertEqual(saveCount, 0)
+    }
+
+    func testMalformedOrMissingPercentagesDoNotBecomeZeroUsage() async {
+        for percentage in ["", "\"used_percent\":null,", "\"used_percent\":true,", "\"used_percent\":\"bad\","] {
+            let profile = Profile(name: "Active", provider: .codex)
+            install(profile, active: true)
+            responseJSON = "{\"rate_limit\":{\"primary_window\":{\(percentage)\"limit_window_seconds\":18000}}}"
+            await expectFailure(makeProvider(), profile: profile, code: .apiParsingFailed)
+            XCTAssertNil(profiles[0].codexAccountID)
+        }
+        XCTAssertEqual(saveCount, 0)
+    }
+
+    func testNegativeAndNonfinitePercentagesDoNotBecomeFreshUsage() async {
+        for percentage in ["-1", "\"NaN\"", "\"Infinity\"", "\"-Infinity\""] {
+            let profile = Profile(name: "Active", provider: .codex)
+            install(profile, active: true)
+            responseJSON = "{\"rate_limit\":{\"primary_window\":{\"used_percent\":\(percentage),\"limit_window_seconds\":18000}}}"
+            await expectFailure(makeProvider(), profile: profile, code: .apiParsingFailed)
+            XCTAssertNil(profiles[0].codexAccountID)
+        }
+        XCTAssertEqual(saveCount, 0)
+    }
+
+    func testGenuinelyReportedZeroAndOverLimitPercentageRemainValid() async throws {
+        for percentage in ["0", "125", "\"0\"", "\"125.5\""] {
+            let profile = Profile(name: "Active", provider: .codex)
+            install(profile, active: true)
+            responseJSON = "{\"rate_limit\":{\"primary_window\":{\"used_percent\":\(percentage),\"limit_window_seconds\":18000}}}"
+            let usage = try await makeProvider().fetchUsage(for: profile)
+            XCTAssertTrue(usage.hasSessionUsage)
+            XCTAssertFalse(usage.hasWeeklyUsage)
+            XCTAssertEqual(profiles[0].codexAccountID, "account-a")
+        }
+        XCTAssertEqual(saveCount, 4)
+    }
+
+    func testLegitimateWeeklyOnlyResponseRemainsUsable() async throws {
+        let profile = Profile(name: "Active", provider: .codex)
+        install(profile, active: true)
+        responseJSON = "{\"rate_limit\":{\"primary_window\":{\"used_percent\":8,\"limit_window_seconds\":604800}}}"
+        let usage = try await makeProvider().fetchUsage(for: profile)
+        XCTAssertFalse(usage.hasSessionUsage)
+        XCTAssertTrue(usage.hasWeeklyUsage)
+        XCTAssertEqual(usage.weeklyPercentage, 8)
+        XCTAssertEqual(profiles[0].codexAccountID, "account-a")
+        XCTAssertEqual(saveCount, 1)
+    }
+
+    func testMalformedWindowDoesNotDiscardUsableCounterpart() async throws {
+        let profile = Profile(name: "Active", provider: .codex)
+        install(profile, active: true)
+        responseJSON = """
+        {"rate_limit":{
+          "primary_window":{"used_percent":"bad","limit_window_seconds":18000},
+          "secondary_window":{"used_percent":8,"limit_window_seconds":604800}}}
+        """
+        let usage = try await makeProvider().fetchUsage(for: profile)
+        XCTAssertFalse(usage.hasSessionUsage)
+        XCTAssertTrue(usage.hasWeeklyUsage)
+        XCTAssertEqual(usage.weeklyPercentage, 8)
+    }
+
+    func testProgrammaticallyConstructedInvalidWindowIsNotMappedAsAvailable() {
+        for percentage in [-1.0, Double.nan, Double.infinity, -Double.infinity] {
+            let response = CodexUsageResponse(planType: "plus", rateLimit: CodexRateLimitDetails(
+                primaryWindow: CodexRateWindow(usedPercent: percentage, resetAt: nil, limitWindowSeconds: 18000),
+                secondaryWindow: CodexRateWindow(usedPercent: 8, resetAt: nil, limitWindowSeconds: 604800)
+            ), credits: nil)
+            let usage = CodexAPIService.mapToUsage(response)
+            XCTAssertFalse(usage.hasSessionUsage)
+            XCTAssertTrue(usage.hasWeeklyUsage)
+            XCTAssertEqual(usage.weeklyPercentage, 8)
+        }
     }
 
     func testAccountChangeDuringAuthRetryIsRejectedBeforeSecondRequest() async throws {

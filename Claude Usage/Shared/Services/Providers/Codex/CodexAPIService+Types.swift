@@ -75,6 +75,8 @@ struct CodexRateWindow: Decodable {
     /// Window length in seconds (e.g. 18000 = 5h, 604800 = 7d).
     let limitWindowSeconds: Int?
 
+    var hasUsablePercentage: Bool { usedPercent.isFinite && usedPercent >= 0 }
+
     var resetDate: Date? {
         resetAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
     }
@@ -91,7 +93,8 @@ struct CodexRateWindow: Decodable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        // used_percent is documented as Int but tolerate doubles/strings
+        // Tolerate numeric strings, but absence and malformed data are not 0%.
+        // The enclosing tolerant rate-limit decoder can retain the other window.
         if let value = try? c.decodeIfPresent(Double.self, forKey: .usedPercent) {
             usedPercent = value
         } else if let value = try? c.decodeIfPresent(Int.self, forKey: .usedPercent) {
@@ -99,7 +102,12 @@ struct CodexRateWindow: Decodable {
         } else if let value = try? c.decodeIfPresent(String.self, forKey: .usedPercent), let parsed = Double(value) {
             usedPercent = parsed
         } else {
-            usedPercent = 0
+            throw DecodingError.dataCorruptedError(forKey: .usedPercent, in: c,
+                                                   debugDescription: "A usage window requires a numeric used_percent.")
+        }
+        guard usedPercent.isFinite && usedPercent >= 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .usedPercent, in: c,
+                                                   debugDescription: "A usage percentage must be finite and nonnegative.")
         }
         resetAt = try? c.decodeIfPresent(Int.self, forKey: .resetAt)
         limitWindowSeconds = try? c.decodeIfPresent(Int.self, forKey: .limitWindowSeconds)
@@ -170,6 +178,8 @@ enum CodexRateWindowNormalizer {
         primary: CodexRateWindow?,
         secondary: CodexRateWindow?
     ) -> (session: CodexRateWindow?, weekly: CodexRateWindow?) {
+        let primary = primary.flatMap { $0.hasUsablePercentage ? $0 : nil }
+        let secondary = secondary.flatMap { $0.hasUsablePercentage ? $0 : nil }
         switch (primary, secondary) {
         case let (.some(p), .some(s)):
             switch (role(for: p), role(for: s)) {

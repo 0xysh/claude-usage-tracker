@@ -75,6 +75,7 @@ in purple. The existing separate menu-bar icons remain available; either opens
 the same combined popup. Disable this preference to restore individual popups.
 The existing Keyboard Shortcuts settings can assign Toggle Popover. The personal
 installation uses Control + Option + Command + U; macOS registration was verified.
+Opening the installed app again from Applications also reveals the dashboard.
 
 Each card uses its own profile's readings and errors. Missing readings show
 Unavailable, failed refreshes or readings older than five minutes show Last known,
@@ -98,6 +99,14 @@ and combined views. Expired or incomplete CLI credentials produce an explicit
 error while preserving the last reading. Reconnect and sync through Claude Code
 when prompted. Browser organization discovery uses only the requested profile's
 session, and an in-flight response cannot be saved into a newly active profile.
+Each card can refresh its own account or open that account's credential settings.
+Saved readings use a clock and neutral menu-bar styling; missing readings retain
+their profile label. The tooltip names session/week percentages and used/remaining
+mode. The percentage mode also applies to single-profile icons while the combined
+view is enabled. Detached combined content uses the combined window width.
+
+The follow-up quality audit and exact current validation limits are in
+[APP-QUALITY-AUDIT-2026-10-07.md](APP-QUALITY-AUDIT-2026-10-07.md).
 
 The focused synthetic regressions cover zero/missing Fable quotas, account
 binding and mismatches, Claude source selection, browser organization isolation,

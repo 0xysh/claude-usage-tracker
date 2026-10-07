@@ -6,8 +6,11 @@ struct CombinedUsageView: View {
     let profiles: [Profile]
     let errors: [UUID: String]
     let isRefreshing: Bool
+    var refreshingProfileIDs: Set<UUID> = []
     let onRefresh: () -> Void
     let onPreferences: () -> Void
+    var onRefreshProfile: ((UUID) -> Void)? = nil
+    var onConfigureProfile: ((UUID) -> Void)? = nil
 
     private var availableHeight: CGFloat {
         min(680, max(320, (NSScreen.main?.visibleFrame.height ?? 800) - 120))
@@ -43,8 +46,10 @@ struct CombinedUsageView: View {
                 HeaderIconButton(icon: "arrow.clockwise", isRefreshing: isRefreshing, action: onRefresh)
                     .disabled(isRefreshing)
                     .help("Refresh all accounts")
+                    .accessibilityLabel("Refresh all accounts")
                 HeaderIconButton(icon: "gearshape.fill", action: onPreferences)
                     .help("Settings")
+                    .accessibilityLabel("Settings")
             }
             .padding(16)
 
@@ -73,8 +78,13 @@ struct CombinedUsageView: View {
                             error: errors[profile.id],
                             showRemaining: profileManager.multiProfileConfig.showRemainingPercentage,
                             isRefreshing: isRefreshing,
-                            onRefresh: onRefresh,
-                            onPreferences: onPreferences
+                            isRefreshingThisProfile: refreshingProfileIDs.contains(profile.id),
+                            onRefresh: {
+                                if let onRefreshProfile { onRefreshProfile(profile.id) } else { onRefresh() }
+                            },
+                            onPreferences: {
+                                if let onConfigureProfile { onConfigureProfile(profile.id) } else { onPreferences() }
+                            }
                         )
                     }
                 }
@@ -90,13 +100,24 @@ struct ProfileUsageCard: View {
     let error: String?
     let showRemaining: Bool
     let isRefreshing: Bool
+    var isRefreshingThisProfile: Bool = false
     let onRefresh: () -> Void
     let onPreferences: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var recoveryMessage: String {
+        if profile.provider == .codex {
+            return "Open this account in Settings and run Test Connection. Your Codex login must match this account."
+        }
+        return profile.hasCliAccount
+            ? "Sign in to Claude Code, then sync this account in Settings."
+            : "Reconnect Claude.ai in this account’s Settings, then refresh."
+    }
 
     private var accent: Color {
-        profile.provider == .anthropic
-            ? Color(red: 0.20, green: 0.77, blue: 0.57)
-            : Color(red: 0.52, green: 0.51, blue: 0.96)
+        profile.provider == .anthropic ? .adaptiveGreen
+            : (colorScheme == .dark ? Color(red: 0.68, green: 0.66, blue: 1)
+                                   : Color(red: 0.32, green: 0.29, blue: 0.72))
     }
 
     var body: some View {
@@ -116,18 +137,20 @@ struct ProfileUsageCard: View {
                         }
                         .foregroundStyle(accent)
                         Text(profile.name)
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
                     }
                     Spacer(minLength: 8)
                     VStack(alignment: .trailing, spacing: 3) {
-                        Text(state == .fresh ? "Fresh" : state == .lastKnown ? "Last known" : "Unavailable")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(state == .fresh ? accent : Color.orange)
+                        Label(state == .fresh ? "Fresh" : state == .lastKnown ? "Saved" : "Not connected",
+                              systemImage: state == .fresh ? "checkmark.circle" : state == .lastKnown ? "clock" : "exclamationmark.circle")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(state == .fresh ? accent : Color.primary)
+                            .fixedSize()
                         if let updated = profile.claudeUsage?.lastUpdated {
                             Text(updated, style: .relative)
-                                .font(.system(size: 10))
+                                .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -138,7 +161,7 @@ struct ProfileUsageCard: View {
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.secondary)
                     SmartUsageDashboard(usage: usage, apiUsage: profile.apiUsage, provider: profile.provider,
-                                        showRemainingOverride: showRemaining)
+                                        showRemainingOverride: showRemaining, readingState: state)
                         .padding(.horizontal, -10)
                     if profile.provider == .anthropic, !usage.hasFableUsage {
                         Text("Fable · No quota reported")
@@ -152,29 +175,40 @@ struct ProfileUsageCard: View {
                         .padding(.vertical, 8)
                 }
 
-                if let error {
-                    Text(error)
-                        .font(.system(size: 11))
+                if error != nil || state == .unavailable {
+                    Text(recoveryMessage)
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                } else if state == .unavailable {
-                    Text("Connect this account in Settings, then refresh.")
+                    if let error {
+                        DisclosureGroup("Connection details") {
+                            Text(error)
+                                .font(.system(size: 11))
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
+                    }
+                } else if state == .lastKnown {
+                    Text("Last received reading. Refresh to check your current allowance.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 HStack {
                     Button(action: onRefresh) {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                        Label(isRefreshingThisProfile ? "Refreshing…" : "Refresh", systemImage: "arrow.clockwise")
                     }
                     .disabled(isRefreshing)
                     Spacer()
                     if state != .fresh {
-                        Button("Settings", action: onPreferences)
+                        Button("Connect account", action: onPreferences)
                     }
                 }
-                .font(.system(size: 11, weight: .medium))
-                .buttonStyle(.borderless)
+                .font(.system(size: 12, weight: .medium))
+                .buttonStyle(.bordered)
                 .tint(accent)
             }
             .padding(14)

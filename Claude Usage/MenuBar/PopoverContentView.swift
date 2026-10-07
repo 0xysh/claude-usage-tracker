@@ -59,7 +59,7 @@ struct PopoverContentView: View {
     let onRefresh: () -> Void
     let onPreferences: () -> Void
 
-    @State private var isRefreshing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showInsights = false
     // Drives a custom entrance animation. The native NSPopover open animation is
     // disabled (see MenuBarManager) because its animated window resize recurses
@@ -112,8 +112,11 @@ struct PopoverContentView: View {
                 profiles: profileManager.profiles.filter(\.isSelectedForDisplay),
                 errors: manager.profileRefreshErrors,
                 isRefreshing: manager.isRefreshing,
+                refreshingProfileIDs: manager.refreshingProfileIDs,
                 onRefresh: onRefresh,
-                onPreferences: onPreferences
+                onPreferences: onPreferences,
+                onRefreshProfile: manager.refreshProfile,
+                onConfigureProfile: manager.configureProfile
             )
             .background(VisualEffectBackground())
         } else {
@@ -126,18 +129,8 @@ struct PopoverContentView: View {
             // Header
             SmartHeader(
                 status: manager.status,
-                isRefreshing: isRefreshing,
-                onRefresh: {
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        isRefreshing = true
-                    }
-                    onRefresh()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            isRefreshing = false
-                        }
-                    }
-                },
+                isRefreshing: manager.isRefreshing,
+                onRefresh: onRefresh,
                 onManageProfiles: onPreferences,
                 onPreferences: onPreferences,
                 clickedProfileId: manager.clickedProfileId
@@ -219,7 +212,9 @@ struct PopoverContentView: View {
 
             // Usage
             if let usage = displayUsage {
-                SmartUsageDashboard(usage: usage, apiUsage: displayAPIUsage, provider: displayProvider)
+                SmartUsageDashboard(usage: usage, apiUsage: displayAPIUsage, provider: displayProvider,
+                                    readingState: UsageDataState.resolve(lastUpdated: usage.lastUpdated,
+                                        refreshFailed: displayProfile.map { manager.profileRefreshErrors[$0.id] != nil } ?? false))
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("No usage data received", systemImage: "clock.badge.exclamationmark")
@@ -246,9 +241,11 @@ struct PopoverContentView: View {
         .opacity(appeared ? 1 : 0)
         .scaleEffect(appeared ? 1 : 0.96, anchor: .top)
         .onAppear {
-            appeared = false
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+            if reduceMotion {
                 appeared = true
+            } else {
+                appeared = false
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { appeared = true }
             }
         }
     }
@@ -597,6 +594,8 @@ struct HeaderIconButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(icon == "gearshape.fill" ? "Settings" : "Refresh usage")
+        .disabled(isRefreshing)
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovered = hovering
@@ -611,6 +610,7 @@ struct SmartUsageDashboard: View {
     let apiUsage: APIUsage?
     var provider: Provider = .anthropic
     var showRemainingOverride: Bool? = nil
+    var readingState: UsageDataState = .fresh
     @StateObject private var profileManager = ProfileManager.shared
     private var capabilities: ProviderCapabilities {
         provider.descriptor.capabilities
@@ -655,14 +655,15 @@ struct SmartUsageDashboard: View {
             UsageRow(
                 title: "menubar.session_usage".localized,
                 subtitle: "menubar.5_hour_window".localized,
-                usedPercentage: usage.effectiveSessionPercentage,
+                usedPercentage: readingState == .fresh ? usage.effectiveSessionPercentage : usage.sessionPercentage,
                 showRemaining: showRemainingPercentage,
                 resetTime: usage.sessionResetTime,
                 periodDuration: Constants.sessionWindow,
                 showTimeMarker: showTimeMarker,
                 showPaceMarker: showPaceMarker,
                 usePaceColoring: usePaceColoring,
-                timeDisplay: timeDisplay
+                timeDisplay: timeDisplay,
+                isAvailable: usage.hasSessionUsage
             )
 
             if usage.designWeeklyTokensUsed > 0 {
@@ -680,7 +681,7 @@ struct SmartUsageDashboard: View {
 
             // All Models (Weekly)
             UsageRow(
-                title: "menubar.all_models".localized,
+                title: provider == .codex ? "Weekly usage" : "menubar.all_models".localized,
                 tag: "menubar.weekly".localized,
                 subtitle: nil,
                 usedPercentage: usage.weeklyPercentage,
@@ -690,7 +691,8 @@ struct SmartUsageDashboard: View {
                 showTimeMarker: showTimeMarker,
                 showPaceMarker: showPaceMarker,
                 usePaceColoring: usePaceColoring,
-                timeDisplay: timeDisplay
+                timeDisplay: timeDisplay,
+                isAvailable: usage.hasWeeklyUsage
             )
 
             if usage.hasFableUsage {
@@ -795,10 +797,22 @@ struct SmartUsageDashboard: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
+        .environment(\.usageReadingState, readingState)
     }
 }
 
 // MARK: - Usage Row (flat, native style)
+private struct UsageReadingStateKey: EnvironmentKey {
+    static let defaultValue: UsageDataState = .fresh
+}
+
+extension EnvironmentValues {
+    var usageReadingState: UsageDataState {
+        get { self[UsageReadingStateKey.self] }
+        set { self[UsageReadingStateKey.self] = newValue }
+    }
+}
+
 struct UsageRow: View {
     let title: String
     var tag: String? = nil
@@ -811,6 +825,11 @@ struct UsageRow: View {
     var showPaceMarker: Bool = true
     var usePaceColoring: Bool = true
     var timeDisplay: PopoverTimeDisplay = .resetTime
+    var isAvailable: Bool = true
+    @Environment(\.usageReadingState) private var readingState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var hasReading: Bool { isAvailable && usedPercentage.isFinite && usedPercentage >= 0 }
 
     private var displayPercentage: Double {
         UsageStatusCalculator.getDisplayPercentage(
@@ -828,12 +847,12 @@ struct UsageRow: View {
     }
 
     private var timeMarkerFraction: CGFloat? {
-        guard showTimeMarker, let f = rawElapsedFraction else { return nil }
+        guard readingState == .fresh, showTimeMarker, let f = rawElapsedFraction else { return nil }
         return CGFloat(showRemaining ? 1.0 - f : f)
     }
 
     private var paceStatus: PaceStatus? {
-        guard showPaceMarker, let elapsed = rawElapsedFraction else { return nil }
+        guard readingState == .fresh, showPaceMarker, let elapsed = rawElapsedFraction else { return nil }
         return PaceStatus.calculate(usedPercentage: usedPercentage, elapsedFraction: elapsed)
     }
 
@@ -853,6 +872,7 @@ struct UsageRow: View {
     }
 
     private var statusColor: Color {
+        guard readingState == .fresh, hasReading else { return .secondary }
         switch statusLevel {
         case .safe: return .adaptiveGreen
         case .moderate: return .orange
@@ -872,7 +892,7 @@ struct UsageRow: View {
 
                         if let tag = tag {
                             Text(tag)
-                                .font(.system(size: 9, weight: .medium))
+                                .font(.system(size: 10, weight: .medium))
                                 .foregroundColor(.secondary)
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
@@ -885,20 +905,22 @@ struct UsageRow: View {
 
                     if let subtitle = subtitle {
                         Text(subtitle)
-                            .font(.system(size: 10))
+                            .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
                 }
 
                 Spacer()
 
-                Text("\(Int(displayPercentage))%")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                Text(MenuBarUsagePresentation.percentageText(hasReading ? displayPercentage : nil))
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
                     .foregroundColor(statusColor)
             }
 
             // Progress bar
-            GeometryReader { geometry in
+            if hasReading {
+              GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 2.5)
                         .fill(Color.primary.opacity(0.08))
@@ -906,7 +928,7 @@ struct UsageRow: View {
                     RoundedRectangle(cornerRadius: 2.5)
                         .fill(statusColor)
                         .frame(width: geometry.size.width * min(displayPercentage / 100.0, 1.0))
-                        .animation(.easeInOut(duration: 0.6), value: displayPercentage)
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: displayPercentage)
                 }
                 .overlay(alignment: .leading) {
                     if let fraction = timeMarkerFraction {
@@ -918,11 +940,16 @@ struct UsageRow: View {
                 }
             }
             .frame(height: 4)
+            } else {
+                Text("No quota reported")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
 
             // Reset time
-            if let reset = resetTime {
+            if hasReading, let reset = resetTime {
                 Text(resetTimeText(for: reset))
-                    .font(.system(size: 9))
+                    .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
         }
@@ -932,9 +959,12 @@ struct UsageRow: View {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
         )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title), \(MenuBarUsagePresentation.percentageText(hasReading ? displayPercentage : nil)) \(showRemaining ? "remaining" : "used")\(readingState == .fresh ? "" : ", last known reading")")
     }
 
     private func resetTimeText(for reset: Date) -> String {
+        if readingState != .fresh, reset < Date() { return "Reported reset: \(reset.resetTimeString())" }
         switch timeDisplay {
         case .resetTime:
             return "menubar.resets_time".localized(with: reset.resetTimeString())

@@ -145,6 +145,7 @@ final class CodexAPIService {
         usage.weeklyLimit = 0  // .empty uses a placeholder token limit; Codex has none
 
         usage.sessionPercentage = session?.usedPercent ?? 0
+        usage.sessionUsageAvailable = session != nil
         if let sessionReset = session?.resetDate {
             usage.sessionResetTime = sessionReset
         } else if let previousReset = previous?.sessionResetTime, previousReset > Date() {
@@ -154,6 +155,7 @@ final class CodexAPIService {
         }
 
         usage.weeklyPercentage = weekly?.usedPercent ?? 0
+        usage.weeklyUsageAvailable = weekly != nil
         if let weeklyReset = weekly?.resetDate {
             usage.weeklyResetTime = weeklyReset
         } else if let previousReset = previous?.weeklyResetTime, previousReset > Date() {

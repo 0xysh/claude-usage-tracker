@@ -22,4 +22,9 @@ final class UsageDataStateTests: XCTestCase {
     func testFailedRefreshLabelsEvenRecentCachedDataAsLastKnown() async {
         XCTAssertEqual(UsageDataState.resolve(lastUpdated: now, refreshFailed: true, now: now), .lastKnown)
     }
+
+    func testFutureDatedCacheCannotAppearFresh() async {
+        XCTAssertEqual(UsageDataState.resolve(lastUpdated: now.addingTimeInterval(600), refreshFailed: false, now: now), .lastKnown)
+        XCTAssertEqual(UsageDataState.resolve(lastUpdated: now.addingTimeInterval(30), refreshFailed: false, now: now), .fresh)
+    }
 }

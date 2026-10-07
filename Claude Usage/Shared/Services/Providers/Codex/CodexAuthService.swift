@@ -64,10 +64,19 @@ final class CodexAuthService {
 
     private let authFileURLOverride: URL?
     private let session: URLSession
+    private let profileContext: @MainActor () -> [Profile]
+    private let saveProfile: @MainActor (Profile) -> Bool
 
-    init(authFileURL: URL? = nil, session: URLSession = .shared) {
+    init(authFileURL: URL? = nil, session: URLSession = .shared,
+         profileContext: @escaping @MainActor () -> [Profile] = { ProfileManager.shared.profiles },
+         saveProfile: @escaping @MainActor (Profile) -> Bool = {
+             ProfileManager.shared.updateProfile($0)
+             return ProfileStore.shared.lastPersistenceError == nil
+         }) {
         authFileURLOverride = authFileURL
         self.session = session
+        self.profileContext = profileContext
+        self.saveProfile = saveProfile
     }
 
     // MARK: - auth.json location
@@ -196,14 +205,19 @@ final class CodexAuthService {
                     }
                 }
                 let refreshed = try await self.refresh(credentials)
-                self.persistRefreshed(refreshed, for: profile)
                 return refreshed
             }
             inflightRefreshes[credentials.refreshToken] = task
             return task
         }
 
-        return try await refreshTask.value
+        let refreshed = try await refreshTask.value
+        // Coalesce the network operation, not its profile commit. Each joined
+        // caller must receive the rotated lineage in its own secure snapshot.
+        try await MainActor.run {
+            try self.persistRefreshed(refreshed, for: profile)
+        }
+        return refreshed
     }
 
     /// In-flight refresh tasks keyed by the refresh token being rotated.
@@ -298,25 +312,42 @@ final class CodexAuthService {
 
     // MARK: - Persisting refreshed tokens
 
-    private func persistRefreshed(_ credentials: CodexCredentials, for profile: Profile) {
+    @MainActor private func persistRefreshed(_ credentials: CodexCredentials, for profile: Profile) throws {
         guard profile.codexCredentialsJSON != nil else { return }
-        // Manual-paste profile: persist to the profile's keychain field.
-        // Serialization failure must NOT nil out the stored credentials,
-        // and the write must patch the CURRENT profile (looked up by id
-        // on the main actor) — `profile` is a value-type snapshot taken
-        // before the network refresh, and writing it back wholesale would
-        // clobber any name/settings edits made while the refresh was in
-        // flight.
-        guard let serialized = Self.serializeAuthJSON(credentials, mergingInto: profile.codexCredentialsJSON) else {
-            LoggingService.shared.logError("Codex: failed to serialize refreshed tokens; keeping stored credentials")
-            return
+        guard var current = profileContext().first(where: { $0.id == profile.id }),
+              current.provider == .codex, let currentJSON = current.codexCredentialsJSON else {
+            throw changedManualProfileError()
         }
-        let profileId = profile.id
-        Task { @MainActor in
-            guard var current = ProfileManager.shared.profiles.first(where: { $0.id == profileId }) else { return }
-            current.codexCredentialsJSON = serialized
-            ProfileManager.shared.updateProfile(current)
+        guard currentJSON == profile.codexCredentialsJSON else {
+            // Two callers can join a refresh for the same profile. The first
+            // commit already stored this exact result; the second is a no-op.
+            if let stored = Self.parse(Data(currentJSON.utf8)),
+               stored.accessToken == credentials.accessToken,
+               stored.refreshToken == credentials.refreshToken,
+               stored.resolvedAccountId == credentials.resolvedAccountId { return }
+            // A login/source replacement while awaiting the network is newer
+            // than this result and must remain intact.
+            throw changedManualProfileError()
         }
+        guard let serialized = Self.serializeAuthJSON(credentials, mergingInto: currentJSON) else {
+            throw AppError(code: .storageEncodingFailed,
+                           message: "The refreshed Codex credentials could not be encoded.",
+                           isRecoverable: true)
+        }
+        current.codexCredentialsJSON = serialized
+        guard saveProfile(current) else {
+            throw AppError(code: .storageWriteFailed,
+                           message: "The refreshed Codex credentials could not be saved securely.",
+                           isRecoverable: true,
+                           recoverySuggestion: "Resolve the storage error, then reconnect this manual Codex account.")
+        }
+    }
+
+    private func changedManualProfileError() -> AppError {
+        AppError(code: .providerCredentialsNotFound,
+                 message: "The Codex credential source changed while it was being refreshed.",
+                 isRecoverable: true,
+                 recoverySuggestion: "Test the current Codex connection again.")
     }
 
     /// Serializes credentials into auth.json shape, merging into existing JSON

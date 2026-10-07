@@ -58,6 +58,14 @@ final class CodexUsageProvider: UsageProviderService {
             accountID = try authorizedFileAccount(refreshed, for: profile)
             response = try await requestUsage(refreshed)
         }
+        let windows = CodexRateWindowNormalizer.normalize(primary: response.rateLimit?.primaryWindow,
+                                                          secondary: response.rateLimit?.secondaryWindow)
+        guard windows.session != nil || windows.weekly != nil else {
+            throw AppError(code: .apiParsingFailed,
+                           message: "Codex did not return a usable usage window.",
+                           isRecoverable: true,
+                           recoverySuggestion: "Refresh again. Your last known usage has been preserved.")
+        }
         if let accountID { try recordSuccessfulFileConnection(accountID, for: profile) }
         return CodexAPIService.mapToUsage(response, previous: previousUsage)
     }

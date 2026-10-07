@@ -99,6 +99,22 @@ final class ClaudeUsageTests: XCTestCase {
         XCTAssertNil(decoded.fableWeeklyResetTime)
     }
 
+    func testMissingLegacyReadingCannotBecomeFreshZeroUsage() throws {
+        let decoded = try JSONDecoder().decode(ClaudeUsage.self, from: Data("{}".utf8))
+        XCTAssertFalse(decoded.hasSessionUsage)
+        XCTAssertFalse(decoded.hasWeeklyUsage)
+        XCTAssertEqual(UsageDataState.resolve(lastUpdated: decoded.lastUpdated, refreshFailed: false), .lastKnown)
+    }
+
+    func testWindowAvailabilitySurvivesCacheRoundTrip() throws {
+        var usage = ClaudeUsage.empty
+        usage.sessionUsageAvailable = false
+        usage.weeklyUsageAvailable = true
+        let decoded = try JSONDecoder().decode(ClaudeUsage.self, from: JSONEncoder().encode(usage))
+        XCTAssertFalse(decoded.hasSessionUsage)
+        XCTAssertTrue(decoded.hasWeeklyUsage)
+    }
+
     func testEncodeDecodeFableFields() throws {
         var original = createUsage(sessionPercentage: 10)
         original.fableWeeklyTokensUsed = 123_456
@@ -297,4 +313,3 @@ final class ClaudeCodeSyncServiceLogicTests: XCTestCase {
         XCTAssertEqual(d.displayLabel, "Claude Code-credentials-abcd1234")
     }
 }
-

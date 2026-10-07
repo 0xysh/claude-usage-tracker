@@ -9,6 +9,8 @@ final class CodexAuthOwnershipTests: XCTestCase {
     private var authURL: URL!
     private var session: URLSession!
     private var service: CodexAuthService!
+    private var profiles: [Profile] = []
+    private var allowSave = true
 
     override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory
@@ -18,7 +20,13 @@ final class CodexAuthOwnershipTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [CodexAuthOwnershipProtocol.self]
         session = URLSession(configuration: configuration)
-        service = CodexAuthService(authFileURL: authURL, session: session)
+        service = CodexAuthService(authFileURL: authURL, session: session,
+                                   profileContext: { [self] in profiles },
+                                   saveProfile: { [self] updated in
+            guard allowSave, let index = profiles.firstIndex(where: { $0.id == updated.id }) else { return false }
+            profiles[index] = updated
+            return true
+        })
         CodexAuthOwnershipProtocol.reset()
     }
 
@@ -91,6 +99,7 @@ final class CodexAuthOwnershipTests: XCTestCase {
         {"tokens":{"access_token":"manual-access","refresh_token":"manual-refresh","account_id":"manual-account"}}
         """
         let profile = Profile(name: "Manual account", provider: .codex, codexCredentialsJSON: manual)
+        profiles = [profile]
         let credentials = try service.loadCredentials(for: profile)
 
         let refreshed = try await service.refreshIfNeeded(credentials, for: profile)
@@ -119,6 +128,87 @@ final class CodexAuthOwnershipTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: authURL.path))
     }
 
+    private func manualProfile(_ name: String = "Manual") -> Profile {
+        Profile(name: name, provider: .codex, codexCredentialsJSON: """
+        {"tokens":{"access_token":"manual-access","refresh_token":"manual-refresh","account_id":"manual-account"}}
+        """)
+    }
+
+    func testJoinedRefreshPersistsRotatedCredentialsToEveryMatchingProfile() async throws {
+        let first = manualProfile("First")
+        let second = manualProfile("Second")
+        profiles = [first, second]
+        CodexAuthOwnershipProtocol.holdResponses = true
+        let firstCredentials = try service.loadCredentials(for: first)
+        let secondCredentials = try service.loadCredentials(for: second)
+        async let firstResult = service.refreshIfNeeded(firstCredentials, for: first)
+        async let secondResult = service.refreshIfNeeded(secondCredentials, for: second)
+        await waitForRequest()
+        CodexAuthOwnershipProtocol.releaseResponses()
+        _ = try await (firstResult, secondResult)
+        await Task.yield()
+
+        XCTAssertEqual(CodexAuthOwnershipProtocol.requests.count, 1)
+        for profile in profiles {
+            let stored = try XCTUnwrap(CodexAuthService.parse(Data(try XCTUnwrap(profile.codexCredentialsJSON).utf8)))
+            XCTAssertEqual(stored.accessToken, "server-refreshed-access")
+            XCTAssertEqual(stored.refreshToken, "server-refreshed-refresh")
+        }
+    }
+
+    func testReplacedManualCredentialsAreNotOverwrittenByAnObsoleteRefresh() async throws {
+        let profile = manualProfile()
+        profiles = [profile]
+        CodexAuthOwnershipProtocol.holdResponses = true
+        let credentials = try service.loadCredentials(for: profile)
+        let operation = Task { try await service.refreshIfNeeded(credentials, for: profile) }
+        await waitForRequest()
+        let replacement = "{\"tokens\":{\"access_token\":\"replacement-access\",\"refresh_token\":\"replacement-refresh\"}}"
+        profiles[0].codexCredentialsJSON = replacement
+        CodexAuthOwnershipProtocol.releaseResponses()
+        do { _ = try await operation.value } catch { /* Obsolete completion may fail safely. */ }
+        await Task.yield()
+        XCTAssertEqual(profiles[0].codexCredentialsJSON, replacement)
+    }
+
+    func testChangedSourceToSharedFileIsNotOverwrittenByAnObsoleteManualRefresh() async throws {
+        let profile = manualProfile()
+        profiles = [profile]
+        CodexAuthOwnershipProtocol.holdResponses = true
+        let credentials = try service.loadCredentials(for: profile)
+        let operation = Task { try await service.refreshIfNeeded(credentials, for: profile) }
+        await waitForRequest()
+        profiles[0].codexCredentialsJSON = nil
+        CodexAuthOwnershipProtocol.releaseResponses()
+        do { _ = try await operation.value } catch { /* Obsolete completion may fail safely. */ }
+        await Task.yield()
+        XCTAssertNil(profiles[0].codexCredentialsJSON)
+    }
+
+    func testManualRefreshReportsSecurePersistenceFailure() async throws {
+        let profile = manualProfile()
+        profiles = [profile]
+        allowSave = false
+        let credentials = try service.loadCredentials(for: profile)
+        do {
+            _ = try await service.refreshIfNeeded(credentials, for: profile)
+            XCTFail("A successful token rotation must not hide failed secure persistence")
+        } catch let error as AppError {
+            XCTAssertEqual(error.code, .storageWriteFailed)
+        }
+        XCTAssertEqual(profiles[0].codexCredentialsJSON, profile.codexCredentialsJSON)
+    }
+
+    private func waitForRequest() async {
+        let deadline = Date().addingTimeInterval(2)
+        while CodexAuthOwnershipProtocol.requests.isEmpty && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertEqual(CodexAuthOwnershipProtocol.requests.count, 1, "The synthetic refresh must reach the held transport")
+        // Give both main-actor callers a chance to join the held task.
+        await Task.yield()
+    }
+
     private func writeAuth(accessToken: String, refreshToken: String, refreshedAt: Date? = nil) throws -> Data {
         var json: [String: Any] = [
             "tokens": ["access_token": accessToken, "refresh_token": refreshToken],
@@ -136,6 +226,22 @@ final class CodexAuthOwnershipTests: XCTestCase {
 private final class CodexAuthOwnershipProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var capturedRequests: [URLRequest] = []
+    private static var pendingResponses: [CodexAuthOwnershipProtocol] = []
+    private static var shouldHoldResponses = false
+
+    static var holdResponses: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return shouldHoldResponses }
+        set { lock.lock(); defer { lock.unlock() }; shouldHoldResponses = newValue }
+    }
+
+    static func releaseResponses() {
+        lock.lock()
+        let pending = pendingResponses
+        pendingResponses = []
+        shouldHoldResponses = false
+        lock.unlock()
+        pending.forEach { $0.completeResponse() }
+    }
 
     static var requests: [URLRequest] {
         lock.lock()
@@ -147,6 +253,8 @@ private final class CodexAuthOwnershipProtocol: URLProtocol {
         lock.lock()
         defer { lock.unlock() }
         capturedRequests = []
+        pendingResponses = []
+        shouldHoldResponses = false
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -155,7 +263,17 @@ private final class CodexAuthOwnershipProtocol: URLProtocol {
     override func startLoading() {
         Self.lock.lock()
         Self.capturedRequests.append(request)
+        if Self.shouldHoldResponses {
+            Self.pendingResponses.append(self)
+            Self.lock.unlock()
+            return
+        }
         Self.lock.unlock()
+
+        completeResponse()
+    }
+
+    private func completeResponse() {
         let data = Data("{\"access_token\":\"server-refreshed-access\",\"refresh_token\":\"server-refreshed-refresh\",\"id_token\":\"synthetic-id\"}".utf8)
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

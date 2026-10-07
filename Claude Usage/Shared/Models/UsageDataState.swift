@@ -8,6 +8,8 @@ enum UsageDataState: Equatable {
 
     static func resolve(lastUpdated: Date?, refreshFailed: Bool, now: Date = Date()) -> Self {
         guard let lastUpdated else { return .unavailable }
-        return refreshFailed || now.timeIntervalSince(lastUpdated) > 300 ? .lastKnown : .fresh
+        let age = now.timeIntervalSince(lastUpdated)
+        // A substantially future-dated cache is not evidence of a recent fetch.
+        return refreshFailed || age > 300 || age < -60 ? .lastKnown : .fresh
     }
 }

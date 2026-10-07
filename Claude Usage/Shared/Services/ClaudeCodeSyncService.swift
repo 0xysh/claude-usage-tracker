@@ -714,6 +714,22 @@ class ClaudeCodeSyncService {
         return nil
     }
 
+    /// Pure identity check shared by the live selector and synthetic tests.
+    func systemCredentialsMatchProfile(_ systemJSON: String, profile: Profile,
+                                       systemAccountJSON: String?) -> Bool {
+        let systemIdentity = accountIdentity(fromOAuthAccountJSON: systemAccountJSON)
+        let profileIdentity = accountIdentity(fromOAuthAccountJSON: profile.oauthAccountJSON)
+        // Known account identities are authoritative. A stale shared lineage
+        // cannot override a positively identified different account.
+        if let systemIdentity, let profileIdentity { return systemIdentity == profileIdentity }
+        // Missing or blank tokens are absence of evidence, never an identity.
+        guard let systemLineage = extractRefreshToken(from: systemJSON),
+              !systemLineage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let savedLineage = profile.cliCredentialsJSON.flatMap(extractRefreshToken),
+              !savedLineage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return systemLineage == savedLineage
+    }
+
     /// Writes an `oauthAccount` object (serialized JSON string) back into
     /// Claude Code's `.claude.json` config file, replacing whatever was there.
     /// Preserves all other top-level keys in the file. Does nothing if no
@@ -1017,21 +1033,19 @@ class ClaudeCodeSyncService {
         // the profile when they belong to the same account.
         if customSvc == nil, ProfileStore.shared.loadActiveProfileId() == profileId {
             if let systemJSON = try? readSystemCredentials() {
-                let systemIdentity = accountIdentity(fromOAuthAccountJSON: readOAuthAccount())
-                let profileIdentity = accountIdentity(fromOAuthAccountJSON: profile.oauthAccountJSON)
-                let sameAccount = (systemIdentity != nil && systemIdentity == profileIdentity)
-                    || extractRefreshToken(from: systemJSON) == profile.cliCredentialsJSON.flatMap(extractRefreshToken)
+                let sameAccount = systemCredentialsMatchProfile(systemJSON, profile: profile,
+                                                                systemAccountJSON: readOAuthAccount())
                 if sameAccount {
                     if !isTokenExpired(systemJSON) {
                         persistProfileCredentialsJSON(profileId: profileId, json: systemJSON)
                         return systemJSON
                     }
-                    // System token EXPIRED: Claude Code refreshes ~60s BEFORE expiry
-                    // while in use, so an expired keychain token means the CLI is idle
-                    // (sleep/inactivity — #268). Safe window to take over the rotation
-                    // ONCE — but the rotated lineage MUST be handed back to the system
-                    // keychain (+ mirror file), or the CLI would be left holding a
-                    // consumed refresh token and forced to /login.
+                    // Polling never owns the CLI's rotation, even if its token
+                    // is expired. Return the snapshot so the provider surfaces
+                    // a login error; only explicit activation may rotate it.
+                    guard allowRotation else { return systemJSON }
+                    // Explicit activation hands any rotated lineage back to
+                    // the system keychain and mirror file together.
                     if let refreshToken = extractRefreshToken(from: systemJSON) {
                         do {
                             let refreshed = try await performTokenRefresh(refreshToken: refreshToken)
@@ -1097,9 +1111,9 @@ class ClaudeCodeSyncService {
         // is owned by an external tool (e.g. the `cux` account switcher, or Claude Code's own
         // keychain rotation). Refreshing here would consume that refresh token out from under
         // the other tool, forcing its next use to fail with invalid_grant ("Please run /login").
-        // Never rotate a lineage we don't own: return the cached snapshot (even if expired) and
-        // let the display fall back to last-known usage. Pinned profiles are safe to refresh
-        // because we write the rotated tokens back to the shared keychain entry below.
+        // Return the cached snapshot (even if expired) during polling and let
+        // the display retain last-known usage. A pin selects a source; it does
+        // not grant a background polling task ownership of token rotation.
         // Exception: an *explicit* activation (allowRotation) must refresh even here.
         // When the user switches to this profile, activateProfile() calls us before the
         // profile becomes the active one, so it lands in this non-active branch. Skipping
@@ -1108,8 +1122,8 @@ class ClaudeCodeSyncService {
         // switch — applyProfileCredentials writes the fresh token straight to the system
         // keychain that Claude Code / cux read. Only *background* monitoring passes
         // allowRotation=false to avoid churning idle accounts.
-        if customSvc == nil && !allowRotation {
-            LoggingService.shared.log("ensureFreshCredentials: '\(profile.name)' is non-active & unpinned; skipping refresh to avoid rotating an externally-owned token")
+        if !allowRotation {
+            LoggingService.shared.log("ensureFreshCredentials: '\(profile.name)' is being polled; skipping token rotation")
             return cliJSON
         }
 
